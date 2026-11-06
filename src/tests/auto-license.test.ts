@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — importa server/worker.js (JS sem tipos); não vai para o bundle
 import { describe, it, expect } from 'vitest'
 import worker, { LicenseStore, processEvent, verifyCaktoSignature, verifyBodySecret, authenticateWebhook, extractV1, normalizeEmail, parseCycleNumber, cycleNumber, timingSafeEqualStr, sha256Hex, ADMIN_MAX_FAILURES } from '../../server/worker.js'
 import { verifyLicense, isProActive, fetchAutoLicense } from '../licensing/licensing'

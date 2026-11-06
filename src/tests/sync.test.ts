@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, it, expect } from 'vitest'
 import { canonicalHash, diffRecords, processQueue, nextRetryAt, makeUpsertOp, makeDeleteOp } from '../sync/engine'
 import { syncAll } from '../sync/syncService'

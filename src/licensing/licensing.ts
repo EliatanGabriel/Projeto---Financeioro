@@ -1,8 +1,6 @@
-// @ts-nocheck
 // ECDSA P-256 via WebCrypto. Public key embedded below; private key NEVER in app.
 const PUBLIC_JWK_JSON='{"kty": "EC", "x": "oRR_sKL4ss5RvdsMsBQZP7yMs4BTQCpe1TX0IWiM-Dw", "y": "WN1LlHcEBIuHN4P7syPF51bIeWq3y13Nu-_HKfICOl8", "crv": "P-256"}'
 function b64uToBuf(s:string){ const t=s.replace(/-/g,'+').replace(/_/g,'/'); const pad=Array.from({length:(4-t.length%4)%4}).map(()=>'=').join(''); const raw=atob(t+pad); const a=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)a[i]=raw.charCodeAt(i); return a }
-function bufToB64u(b:ArrayBuffer){ const bytes=new Uint8Array(b); let s=''; bytes.forEach(x=>s+=String.fromCharCode(x)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'') }
 export interface LicensePayload{holder:string;deviceId:string;issuedAt:string;expiresAt:string|null;plan:string}
 export function getDeviceId(){
  let id=localStorage.getItem('precifica.deviceId'); if(!id){ const a=new Uint8Array(16); crypto.getRandomValues(a); id=Array.from(a).map(b=>b.toString(16).padStart(2,'0')).join(''); localStorage.setItem('precifica.deviceId',id) } return id

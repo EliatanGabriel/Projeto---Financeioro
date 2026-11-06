@@ -1,18 +1,16 @@
-// @ts-nocheck
 import { useEffect, useMemo, useState } from 'react'
 import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink } from 'lucide-react'
 import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup } from './database/db'
-import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments, BUY_TYPES, SELL_TYPES } from './calculations/investments'
+import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
 import { brl, newId, num } from './utils/format'
 import { exportCSV, exportPDFReport, exportXLSX } from './utils/reports'
-import { summarize, monthlyHistory, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, dateForDay, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
+import { summarize, monthlyHistory, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
 import { annualSummary, compareAnnual, financialScore, spendingTrend, proInsights } from './calculations/annual'
 import { PRO_PRICE_BRL, PRO_FEATURES, FREE_FEATURES, FREE_LIMITS, getCheckoutUrl, isCheckoutConfigured, getLicenseApiUrl, isLicenseApiConfigured } from './config/plans'
 import { verifyLicense, getDeviceId, isProActive, proDaysLeft, fetchAutoLicense } from './licensing/licensing'
 import { useAuth } from './auth/useAuth'
-import { supabaseConfigured } from './supabase/client'
 import { SYNC_ENTITIES } from './sync/engine'
-import { backfillLegacyUser, reassignLegacyUser } from './database/db'
+import { legacyCounts, reassignLegacyUser } from './database/db'
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Legend } from 'recharts'
 import type { Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence, Category, Investment, InvestmentTransaction } from './types'
 
@@ -45,7 +43,7 @@ async function ensureMonthlyRecurrences(uid: string) {
     const goals = await listGoals(uid); const done = await listGoalAutoLaunches(uid)
     for (const g of goals.filter((x: any) => (x.autoMonthly || 0) > 0 && x.saved < x.target)) {
       if (done.some((d: any) => d.goalId === g.id && d.month === month)) continue
-      await upsertGoal({ ...g, userId: uid, saved: Math.min(g.target, g.saved + g.autoMonthly) })
+      await upsertGoal({ ...g, userId: uid, saved: Math.min(g.target, g.saved + (g.autoMonthly || 0)) })
       await markGoalAutoLaunched(g.id, month, uid)
     }
   } catch {}
@@ -89,7 +87,7 @@ export default function App() {
   const [invTx, setInvTx] = useState<InvestmentTransaction[]>([])
 
   const reload = async () => {
-    let uid = await getSetting('userId')
+    let uid = authUser?.id || (await getSetting('userId'))
     if (!uid) { uid = getDeviceId(); await setSetting('userId', uid) }
     setUserId(uid)
     setInvestments(await listInvestments(uid)); setInvTx(await listAllInvestmentTransactions(uid))
@@ -136,6 +134,7 @@ export default function App() {
       if (legacyTotal > 0 || ambiguous > 0) setMigration({ counts, legacyTotal, ambiguous })
     })()
   }, [authUser?.id])
+  useEffect(() => { if (authUser?.id) reload() }, [authUser?.id])
   useEffect(() => { (async () => {
     const uidNow = auth?.user?.id || (await getSetting('userId')) || getDeviceId()
     try { await ensureMonthlyRecurrences(uidNow) } catch {}
@@ -286,7 +285,7 @@ export default function App() {
           {tab === 'contas' && <Contas userId={uid} bills={bills} bsum={bsum} month={month} reload={reload} show={show} enqueueDelete={enqueueDelete} />}
           {tab === 'metas' && <Metas userId={uid} goals={goals} reload={reload} show={show} isPro={isPro} requirePro={requirePro} enqueueDelete={enqueueDelete} />}
           {tab === 'resumo' && <Resumo userId={uid} s={s} history={history12} tx={tx} month={month} budgets={budgets} bstatus={bstatus} fc={fc} expenseCats={expenseCats} reload={reload} show={show} goals={goals} isPro={isPro} requirePro={requirePro} />}
-          {tab === 'investimentos' && <Investimentos userId={userId} investments={investments} allTx={invTx} reload={reload} show={show} />}
+          {tab === 'investimentos' && <Investimentos userId={uid} investments={investments} allTx={invTx} reload={reload} show={show} />}
           {tab === 'pro' && <ProView pro={pro} checkout={checkout} checkoutConfigured={isCheckoutConfigured(checkout)} licenseApi={licenseApi} licenseApiConfigured={isLicenseApiConfigured(licenseApi)} reload={reload} show={show} goTab={setTab} />}
           {tab === 'config' && <Config userId={uid} name={name} setName={setName} dark={dark} setDark={setDark} categories={categories} reload={reload} show={show} tx={tx} isPro={isPro} accent={accent} setAccent={setAccent} requirePro={requirePro} checkoutUrl={checkoutUrl} setCheckoutUrl={setCheckoutUrl} licenseApiUrl={licenseApiUrl} setLicenseApiUrl={setLicenseApiUrl} goPro={() => setTab('pro')} pro={pro} enqueueDelete={enqueueDelete} auth={auth} syncState={syncState} runSync={runSync} />}
         </main>
@@ -322,7 +321,7 @@ function Field({ label, value, onChange, placeholder, type = 'text' }: any) { re
 function GoalBar({ g }: any) { const p = goalProgress(g); return <div><div className="flex justify-between text-sm"><b>{g.name}</b><span className="muted">{brl(g.saved)} de {brl(g.target)}</span></div><div className="progress"><div style={{ width: p.pct + '%' }} /></div><div className="muted text-xs mt-1">{p.done ? 'Meta alcançada! Parabéns.' : `${p.pct}% • faltam ${brl(p.remaining)}${p.perMonth ? ` • guardando ${brl(p.perMonth)} por mês você chega lá` : ''}`}</div></div> }
 function BudgetBar({ b }: any) { const col = b.status === 'estourou' ? '#E11D63' : b.status === 'atencao' ? '#F59E0B' : GREEN; return <div><div className="flex justify-between text-sm"><b>{b.category}</b><span className="muted">{brl(b.spent)} de {brl(b.limit)}</span></div><div className="progress"><div style={{ width: Math.min(100, b.pct) + '%', background: col }} /></div><div className="text-xs mt-1" style={{ color: col }}>{b.status === 'estourou' ? `Passou ${brl(-b.remaining)} do limite` : b.status === 'atencao' ? `Faltam ${brl(b.remaining)} do limite` : `Ainda pode gastar ${brl(b.remaining)}`}</div></div> }
 
-function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, recurrences, launches, isPro, requirePro }: any) {
+function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, recurrences, launches, isPro, requirePro, enqueueDelete }: any) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() })
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all')
@@ -334,7 +333,7 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
   const save = async () => {
     const t: Transaction = { id: editingId || newId(), description: form.description.trim(), amount: num(form.amount), type: form.type, category: form.category, date: form.date, createdAt: new Date().toISOString() }
     const errs = validateTransaction(t); if (errs.length) return show(errs[0])
-    await addTransaction({ ...t, userId }); await reload(); setEditingId(null); setForm({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() }); show(editingId ? 'Alteração salva' : (t.type === 'in' ? 'Entrada adicionada' : 'Saída adicionada'))
+    try { await addTransaction({ ...t, userId }); await reload(); setEditingId(null); setForm({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() }); show(editingId ? 'Alteração salva' : (t.type === 'in' ? 'Entrada adicionada' : 'Saída adicionada')) } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
   }
   const edit = (t: any) => { setEditingId(t.id); setForm({ description: t.description, amount: String(t.amount).replace('.', ','), type: t.type, category: t.category, date: t.date }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   return <div className="space-y-5">
@@ -355,7 +354,7 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
       <div className="flex gap-2 mt-5 flex-wrap"><button className="btn w-full sm:w-auto" onClick={save}><Plus size={17} /> {editingId ? 'Salvar alterações' : 'Salvar'}</button>{editingId && <button className="btn-ghost" onClick={() => { setEditingId(null); setForm({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() }) }}>Cancelar</button>}</div>
     </section>
 
-    <Recorrencias recurrences={recurrences} launches={launches} month={month} reload={reload} show={show} expenseCats={expenseCats} incomeCats={incomeCats} isPro={isPro} requirePro={requirePro} />
+    <Recorrencias userId={userId} recurrences={recurrences} launches={launches} month={month} reload={reload} show={show} expenseCats={expenseCats} incomeCats={incomeCats} isPro={isPro} requirePro={requirePro} enqueueDelete={enqueueDelete} />
 
     <section className="card p-5">
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
@@ -368,26 +367,24 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
           <div className="flex-1 min-w-0"><div className="font-bold truncate">{t.description}</div><div className="muted text-xs">{t.category} • {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
           <b className={t.type === 'in' ? 'text-emerald-600' : ''}>{t.type === 'in' ? '+' : '−'} {brl(t.amount)}</b>
           <button className="iconbtn" onClick={() => edit(t)} aria-label="Editar"><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (confirm('Apagar este lançamento?')) { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } }} aria-label="Apagar"><Trash2 size={15} /></button>
+          <button className="iconbtn" onClick={async () => { if (!confirm('Apagar este lançamento?')) return; try { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar"><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
   </div>
 }
 
-function Recorrencias({ userId, recurrences, launches, month, reload, show, expenseCats, incomeCats, isPro, requirePro }: any) {
+function Recorrencias({ userId, recurrences, launches, month, reload, show, expenseCats, incomeCats, isPro, requirePro, enqueueDelete }: any) {
   const [form, setForm] = useState<any>({ description: '', amount: '', type: 'in', category: 'Salário', day: '5' })
   const cats = form.type === 'in' ? incomeCats : expenseCats
   const save = async () => {
     if (!isPro && recurrences.filter((r: any) => r.active).length >= FREE_LIMITS.recurrences) return requirePro()
     if (!form.description.trim() || !num(form.amount)) return show('Informe o nome e o valor')
-    await upsertRecurrence({ id: newId(), userId, description: form.description.trim(), amount: num(form.amount), type: form.type, category: form.category, day: Number(form.day) || 1, active: true, createdAt: new Date().toISOString() })
-    await reload(); setForm({ description: '', amount: '', type: 'in', category: 'Salário', day: '5' }); show('Todo mês entra automaticamente')
+    try { await upsertRecurrence({ id: newId(), userId, description: form.description.trim(), amount: num(form.amount), type: form.type, category: form.category, day: Number(form.day) || 1, active: true, createdAt: new Date().toISOString() }); await reload(); setForm({ description: '', amount: '', type: 'in', category: 'Salário', day: '5' }); show('Todo mês entra automaticamente') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
   }
   const launch = async (r: any) => {
     if (isRecurrenceLaunched(launches, r, month)) return show('Já lançado neste mês')
-    await addTransaction({ id: newId(), userId: uid, description: r.description, amount: r.amount, type: r.type, category: r.category, date: recurrenceDate(r, month), createdAt: new Date().toISOString() })
-    await markRecurrenceLaunched(r.id, month, uid); await reload(); show('Lançado em ' + monthLabel(month))
+    try { await addTransaction({ id: newId(), userId, description: r.description, amount: r.amount, type: r.type, category: r.category, date: recurrenceDate(r, month), createdAt: new Date().toISOString() }); await markRecurrenceLaunched(r.id, month, userId); await reload(); show('Lançado em ' + monthLabel(month)) } catch (e: any) { show(e?.message || 'Não foi possível lançar. Tente de novo.') }
   }
   return <section className="card p-5 md:p-6">
     <h2 className="font-bold text-lg flex items-center gap-2"><CalendarClock size={19} /> Todo mês entra ou sai</h2>
@@ -402,18 +399,17 @@ function Recorrencias({ userId, recurrences, launches, month, reload, show, expe
     <button className="btn mt-4" onClick={save}><Plus size={17} /> Criar recorrência</button>
     {recurrences.length > 0 && <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--border)' }}>{recurrences.map((r: any) => {
       const launched = isRecurrenceLaunched(launches, r, month)
-      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" onClick={async () => { if (confirm('Apagar esta recorrência?')) { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } }}><Trash2 size={15} /></button></div>
+      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
     })}</div>}
   </section>
 }
 
-function Contas({ userId, bills, bsum, month, reload, show }: any) {
+function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: any) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ name: '', amount: '', dueDay: '10' })
   const save = async (name = form.name) => {
     if (!name.trim() || !num(form.amount)) return show('Informe o nome e o valor da conta')
-    await upsertFixedBill({ id: editingId || newId(), userId, name: name.trim(), amount: num(form.amount), dueDay: Number(form.dueDay) || 1, category: 'Contas da casa', createdAt: new Date().toISOString() })
-    await reload(); setEditingId(null); setForm({ name: '', amount: '', dueDay: '10' }); show('Conta fixa salva')
+    try { await upsertFixedBill({ id: editingId || newId(), userId, name: name.trim(), amount: num(form.amount), dueDay: Number(form.dueDay) || 1, category: 'Contas da casa', createdAt: new Date().toISOString() }); await reload(); setEditingId(null); setForm({ name: '', amount: '', dueDay: '10' }); show('Conta fixa salva') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
   }
   const edit = (b: any) => { setEditingId(b.id); setForm({ name: b.name, amount: String(b.amount).replace('.', ','), dueDay: String(b.dueDay) }) }
   return <div className="space-y-5">
@@ -432,19 +428,19 @@ function Contas({ userId, bills, bsum, month, reload, show }: any) {
       <div className="flex flex-wrap justify-between gap-2"><h2 className="font-bold">Suas contas em {monthLabel(month)}</h2><span className="text-sm"><b className="text-emerald-600">Pagou {brl(bsum.paidTotal)}</b> • <b className="text-rose-600">Falta {brl(bsum.pendingTotal)}</b></span></div>
       {!bills.length ? <Empty text="Você ainda não cadastrou nenhuma conta fixa." /> : bsum.items.map((b: any) => (
         <div key={b.id} className={`txrow ${b.paid ? 'opacity-60' : ''}`}>
-          <label className="flex items-center gap-2 shrink-0"><input type="checkbox" checked={b.paid} onChange={async e => { await setBillPaid(b.id, month, e.target.checked, userId); await reload(); show(e.target.checked ? 'Marcada como paga' : 'Marcada como pendente') }} /><span className="text-xs font-bold">Paga</span></label>
+          <label className="flex items-center gap-2 shrink-0"><input type="checkbox" checked={b.paid} onChange={async e => { try { await setBillPaid(b.id, month, e.target.checked, userId); await reload(); show(e.target.checked ? 'Marcada como paga' : 'Marcada como pendente') } catch (err:any) { show(err?.message || 'Não foi possível salvar.'); await reload() } }} /><span className="text-xs font-bold">Paga</span></label>
           <div className={`tx-icon ${b.paid ? 'in' : 'out'}`}>{b.paid ? <Check size={16} /> : <Receipt size={16} />}</div>
           <div className="flex-1"><div className={`font-bold ${b.paid ? 'line-through' : ''}`}>{b.name}</div><div className="muted text-xs">Vence dia {b.dueDay}{b.overdue ? ' • venceu!' : b.dueSoon ? ` • vence em ${b.daysToDue} dia(s)` : ''}</div></div>
           <b>{brl(b.amount)}</b>
           <button className="iconbtn" onClick={() => edit(b)}><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (confirm('Apagar esta conta?')) { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
   </div>
 }
 
-function Metas({ userId, goals, reload, show, isPro, requirePro }: any) {
+function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }: any) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ name: '', target: '', saved: '', deadline: '', autoMonthly: '' })
   const [add, setAdd] = useState<Record<string, string>>({})
@@ -452,8 +448,7 @@ function Metas({ userId, goals, reload, show, isPro, requirePro }: any) {
     if (!editingId && !isPro && goals.length >= FREE_LIMITS.goals) return requirePro()
     if (!form.name.trim() || !num(form.target)) return show('Informe o nome e quanto você quer juntar')
     if (num(form.autoMonthly) > 0 && !isPro) return requirePro()
-    await upsertGoal({ id: editingId || newId(), userId, name: form.name.trim(), target: num(form.target), saved: num(form.saved || '0'), deadline: form.deadline, autoMonthly: isPro ? num(form.autoMonthly || '0') : 0, createdAt: new Date().toISOString() })
-    await reload(); setEditingId(null); setForm({ name: '', target: '', saved: '', deadline: '', autoMonthly: '' }); show('Meta salva. Hora de guardar!')
+    try { await upsertGoal({ id: editingId || newId(), userId, name: form.name.trim(), target: num(form.target), saved: num(form.saved || '0'), deadline: form.deadline, autoMonthly: isPro ? num(form.autoMonthly || '0') : 0, createdAt: new Date().toISOString() }); await reload(); setEditingId(null); setForm({ name: '', target: '', saved: '', deadline: '', autoMonthly: '' }); show('Meta salva. Hora de guardar!') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
   }
   const edit = (g: any) => { setEditingId(g.id); setForm({ name: g.name, target: String(g.target).replace('.', ','), saved: String(g.saved).replace('.', ','), deadline: g.deadline || '', autoMonthly: g.autoMonthly ? String(g.autoMonthly).replace('.', ',') : '' }) }
   return <div className="space-y-5">
@@ -479,9 +474,9 @@ function Metas({ userId, goals, reload, show, isPro, requirePro }: any) {
           {g.autoMonthly > 0 && <div className="text-xs mt-1 flex items-center gap-1 text-emerald-600"><Sparkles size={12} /> Guardando sozinha {brl(g.autoMonthly)} todo mês (Pro)</div>}
           <div className="flex gap-2 mt-2">
             <input className="input" placeholder="Adicionar R$" value={add[g.id] || ''} onChange={e => setAdd({ ...add, [g.id]: e.target.value })} inputMode="decimal" />
-            <button className="btn" onClick={async () => { const v = num(add[g.id] || ''); if (!v) return show('Informe um valor'); await upsertGoal({ ...g, userId, saved: g.saved + v }); await reload(); setAdd({ ...add, [g.id]: '' }); show('Valor adicionado. Continue assim!') }}>Guardar</button>
+            <button className="btn" onClick={async () => { const v = num(add[g.id] || ''); if (!v) return show('Informe um valor'); try { await upsertGoal({ ...g, userId, saved: g.saved + v }); await reload(); setAdd({ ...add, [g.id]: '' }); show('Valor adicionado. Continue assim!') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') } }}>Guardar</button>
             <button className="iconbtn" onClick={() => edit(g)}><Pencil size={15} /></button>
-            <button className="iconbtn" onClick={async () => { if (confirm('Apagar esta meta?')) { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } }}><Trash2 size={15} /></button>
+            <button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
           </div>
         </div>
       ))}
@@ -489,13 +484,13 @@ function Metas({ userId, goals, reload, show, isPro, requirePro }: any) {
   </div>
 }
 
-function BudgetRow({ cat, budget, reload, show }: any) {
+function BudgetRow({ cat, budget, reload, show, userId }: any) {
   const [val, setVal] = useState(budget ? String(budget.limit).replace('.', ',') : '')
   useEffect(() => { setVal(budget ? String(budget.limit).replace('.', ',') : '') }, [budget?.limit, cat])
   return <div className="flex items-center gap-2 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
     <span className="w-32 shrink-0 text-sm font-medium">{cat}</span>
     <input className="input" placeholder="Sem limite" value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" />
-    <button className="btn-ghost shrink-0" onClick={async () => { await setBudget(cat, num(val), userId); await reload(); show(num(val) ? 'Limite salvo' : 'Limite removido') }}>Salvar</button>
+    <button className="btn-ghost shrink-0" onClick={async () => { try { await setBudget(cat, num(val), userId); await reload(); show(num(val) ? 'Limite salvo' : 'Limite removido') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') } }}>Salvar</button>
   </div>
 }
 
@@ -525,7 +520,7 @@ function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCa
     <section className="card p-5">
       <h2 className="font-bold">Limites por categoria</h2>
       <p className="muted text-sm">Defina quanto quer gastar no máximo em cada categoria. Ex.: Alimentação até R$ 800.</p>
-      <div className="mt-3">{expenseCats.map((c: string) => <BudgetRow key={c} cat={c} budget={bmap[c]} reload={reload} show={show} />)}</div>
+      <div className="mt-3">{expenseCats.map((c: string) => <BudgetRow key={c} cat={c} budget={bmap[c]} reload={reload} show={show} userId={userId} />)}</div>
       {bstatus.length > 0 && <div className="mt-5 space-y-3"><h3 className="font-bold text-sm">Como está</h3>{bstatus.map((b: any) => <BudgetBar key={b.category} b={b} />)}</div>}
     </section>
     <section className="card p-5">
@@ -578,7 +573,7 @@ function AnnualView({ tx, isPro, requirePro, show }: any) {
     </section>
     <div className="grid md:grid-cols-2 gap-4">
       <section className="card p-5"><h2 className="font-bold mb-3">Onde mais gastou no ano</h2>{a.byCategory.length ? a.byCategory.slice(0, 6).map((c: any, i: number) => <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, a.expense ? (c.value / a.expense) * 100 : 0) + '%', background: PIE_COLORS[i % PIE_COLORS.length] }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>) : <p className="muted text-sm">Sem gastos no ano.</p>}</section>
-      <section className="card p-5"><h2 className="font-bold mb-3">Melhor e pior mês</h2>{a.bestMonth ? <div className="space-y-2 text-sm"><div>Melhor: <b className="capitalize">{monthLabel(a.bestMonth.month)}</b> — sobraram {brl(a.bestMonth.balance)}</div><div>Pior: <b className="capitalize">{monthLabel(a.worstMonth.month)}</b> — {a.worstMonth.balance >= 0 ? 'sobraram' : 'faltaram'} {brl(Math.abs(a.worstMonth.balance))}</div><div className="muted">Média de gastos por mês: {brl(a.avgExpense)}</div></div> : <p className="muted text-sm">Sem dados.</p>}</section>
+      <section className="card p-5"><h2 className="font-bold mb-3">Melhor e pior mês</h2>{a.bestMonth ? <div className="space-y-2 text-sm"><div>Melhor: <b className="capitalize">{monthLabel(a.bestMonth.month)}</b> — sobraram {brl(a.bestMonth.balance)}</div><div>Pior: <b className="capitalize">{monthLabel(a.worstMonth!.month)}</b> — {a.worstMonth!.balance >= 0 ? 'sobraram' : 'faltaram'} {brl(Math.abs(a.worstMonth!.balance))}</div><div className="muted">Média de gastos por mês: {brl(a.avgExpense)}</div></div> : <p className="muted text-sm">Sem dados.</p>}</section>
     </div>
     {isPro ? (
       <div className="space-y-5">
@@ -623,8 +618,11 @@ function AuthScreen({ auth }: any) {
   const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login')
   const [name, setName] = useState(''); const [email, setEmail] = useState(''); const [password, setPassword] = useState('')
   const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false)
+  const [consent, setConsent] = useState(false)
   const submit = async () => {
-    if (busy) return; setBusy(true); setMsg('')
+    if (busy) return
+    if (mode === 'signup' && !consent) return setMsg('Marque a caixa de Termos e Privacidade para continuar.')
+    setBusy(true); setMsg('')
     try {
       if (mode === 'login') { const r = await auth.signIn(email, password); setMsg(r.error || ''); if (!r.error) setMsg('') }
       else if (mode === 'signup') { const r = await auth.signUp(name, email, password); if (r.error) setMsg(r.error); else if (r.needsConfirmation) setMsg('Conta criada! Confirmamos por e-mail — confirme para entrar.'); else setMsg('') }
@@ -638,12 +636,14 @@ function AuthScreen({ auth }: any) {
     {mode === 'signup' && <Field label="Nome" value={name} onChange={(v: any) => setName(v)} placeholder="Seu nome" />}
     <Field label="E-mail" value={email} onChange={(v: any) => setEmail(v)} placeholder="voce@email.com" />
     {mode !== 'forgot' && <Field label="Senha" value={password} onChange={(v: any) => setPassword(v)} placeholder="••••••••" type="password" />}
+    {mode === 'signup' && <label className="flex items-start gap-2 text-xs muted"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-0.5" /><span>Li e concordo com os <a className="link" href="/termos.html" target="_blank" rel="noreferrer">Termos de Uso</a> e a <a className="link" href="/privacidade.html" target="_blank" rel="noreferrer">Política de Privacidade</a> (LGPD), incluindo o uso do Supabase para sincronização.</span></label>}
     {msg && <p className="text-sm text-emerald-600">{msg}</p>}
     <button className="btn w-full" onClick={submit} disabled={busy}>{busy ? 'Aguarde...' : mode === 'forgot' ? 'Enviar link de recuperação' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
     <div className="flex justify-between text-sm">
       {mode !== 'login' && <button className="link" onClick={() => setMode('login')}>Já tenho conta</button>}
       {mode === 'login' && <><button className="link" onClick={() => setMode('forgot')}>Esqueci minha senha</button><button className="link" onClick={() => setMode('signup')}>Criar conta</button></>}
     </div>
+    <div className="text-xs muted text-center"><a href="/termos.html" target="_blank" rel="noreferrer">Termos</a> · <a href="/privacidade.html" target="_blank" rel="noreferrer">Privacidade</a> · <a href="mailto:suporte@noazul.app.br">Suporte</a></div>
   </div></div>
 }
 function ResetPasswordScreen({ auth }: any) {
@@ -664,12 +664,13 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
   const [txs, setTxs] = useState<InvestmentTransaction[]>([])
   const s = useMemo(() => summarizeInvestments(investments, allTx), [investments, allTx])
   const selected = investments.find((i: any) => i.id === selectedId)
-  useEffect(() => { if (selectedId && userId) listInvestmentTransactions(selectedId, userId).then(setTxs) }, [selectedId, userId, investments])
+  useEffect(() => { if (selectedId && userId) listInvestmentTransactions(selectedId, userId).then(setTxs).catch(() => setTxs([])) }, [selectedId, userId, investments])
   const resetForm = () => { setEditingId(null); setForm({ name: '', category: 'Renda fixa', ticker: '', institution: '', quantity: '', averagePrice: '', investedAmount: '', currentValue: '', startedAt: today(), notes: '' }) }
   const save = async () => {
+    if (!userId) return show('Aguarde carregar seus dados e tente de novo.')
     const inv: Investment = { id: editingId || newId(), userId, name: form.name.trim(), category: form.category, ticker: form.ticker.trim().toUpperCase(), institution: form.institution.trim(), quantity: num(form.quantity || '0'), averagePrice: num(form.averagePrice || '0'), investedAmount: num(form.investedAmount || '0'), currentValue: num(form.currentValue || '0'), startedAt: form.startedAt, notes: form.notes.trim(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
     const errs = validateInvestment(inv); if (errs.length) return show(errs[0])
-    await upsertInvestment(inv); await reload(); resetForm(); show('Investimento salvo')
+    try { await upsertInvestment(inv); await reload(); resetForm(); show('Investimento salvo') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
   }
   const edit = (inv: any) => { setEditingId(inv.id); setSelectedId(null); setForm({ name: inv.name, category: inv.category, ticker: inv.ticker, institution: inv.institution, quantity: String(inv.quantity).replace('.', ','), averagePrice: String(inv.averagePrice).replace('.', ','), investedAmount: String(inv.investedAmount).replace('.', ','), currentValue: String(inv.currentValue).replace('.', ','), startedAt: inv.startedAt || today(), notes: inv.notes }) }
   const [saving, setSaving] = useState(false); const [editingTxId, setEditingTxId] = useState<string | null>(null)
@@ -702,7 +703,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
     try { await deleteInvestmentTransaction(t.id, userId, updated); if (editingTxId === t.id) setEditingTxId(null); await reload(); show('Movimentação excluída') } catch (e: any) { show(e?.message || 'Não foi possível excluir') }
   }
   const list = investments.filter((i: any) => (i.name.toLowerCase().includes(search.toLowerCase()) || i.ticker.toLowerCase().includes(search.toLowerCase())) && (filterCat === 'Todas' || i.category === filterCat) && (filterInst === 'Todas' || i.institution === filterInst))
-  const instList = [...new Set(investments.map((i: any) => i.institution).filter(Boolean))]
+  const instList: string[] = [...new Set(investments.map((i: any) => i.institution).filter(Boolean))] as string[]
   return <div className="space-y-5">
     <section className="hero">
       <div className="muted text-sm font-semibold">Patrimônio atual em investimentos</div>
@@ -748,7 +749,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
           <div className="text-right"><b>{brl(inv.currentValue)}</b><div className={`text-xs font-bold ${g.gain >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{g.gain >= 0 ? '+' : ''}{brl(g.gain)} ({g.pct}%)</div></div>
           <button className="btn-ghost" onClick={() => setSelectedId(inv.id)}>Detalhes</button>
           <button className="iconbtn" onClick={() => edit(inv)}><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload() } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" onClick={async () => { if (!confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>) })}
     </section>
     {selected && <section className="card p-5 md:p-6 space-y-4">
@@ -773,13 +774,13 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
       </div>
       <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
         <h3 className="font-bold mb-3">Histórico</h3>
-        {!txs.length ? <p className="muted text-sm">Sem movimentações ainda.</p> : txs.map((t: any) => <div key={t.id} className="txrow"><div className="tx-icon in"><ArrowLeftRight size={16} /></div><div className="flex-1 min-w-0"><div className="font-bold">{TX_LABELS[t.type]} {t.description ? `— ${t.description}` : ''}</div><div className="muted text-xs">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}{t.quantity ? ` • ${t.quantity} un` : ''}{t.realizedGain ? ` • realizado ${brl(t.realizedGain)}` : ''}</div></div><b>{brl(t.amount)}</b><button className="iconbtn" onClick={() => editTx(t)}><Pencil size={15} /></button><button className="iconbtn" onClick={() => removeTx(t)}><Trash2 size={15} /></button></div>)}
+        {!txs.length ? <p className="muted text-sm">Sem movimentações ainda.</p> : txs.map((t: any) => <div key={t.id} className="txrow"><div className="tx-icon in"><ArrowLeftRight size={16} /></div><div className="flex-1 min-w-0"><div className="font-bold">{(TX_LABELS as any)[t.type]} {t.description ? `— ${t.description}` : ''}</div><div className="muted text-xs">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}{t.quantity ? ` • ${t.quantity} un` : ''}{t.realizedGain ? ` • realizado ${brl(t.realizedGain)}` : ''}</div></div><b>{brl(t.amount)}</b><button className="iconbtn" onClick={() => editTx(t)}><Pencil size={15} /></button><button className="iconbtn" onClick={() => removeTx(t)}><Trash2 size={15} /></button></div>)}
       </div>
     </section>}
   </div>
 }
 
-function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConfigured, reload, show, goTab }: any) {
+function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConfigured, reload, show }: any) {
   const [key, setKey] = useState(''); const [msg, setMsg] = useState('')
   const [email, setEmail] = useState(''); const [checking, setChecking] = useState(false)
   useEffect(() => { getSetting('caktoEmail').then(v => { if (v) setEmail(v) }) }, [])
@@ -789,10 +790,12 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
     setMsg('Pro ativado!'); show('Pro ativado'); await reload()
   }
   const activate = async () => {
-    const r = await verifyLicense(key, dev)
-    if (!r.ok) { setMsg(r.reason); return show(r.reason) }
-    if (!isProActive(r.payload)) { setMsg('Esta chave já expirou. Renove a assinatura na Cakto e use a nova chave.'); return show('Chave expirada') }
-    await saveLicense(key.trim(), r.payload!.holder, r.payload!.expiresAt, r.payload!.plan)
+    try {
+      const r = await verifyLicense(key, dev)
+      if (!r.ok) { setMsg(r.reason); return show(r.reason) }
+      if (!isProActive(r.payload)) { setMsg('Esta chave já expirou. Renove a assinatura na Cakto e use a nova chave.'); return show('Chave expirada') }
+      await saveLicense(key.trim(), r.payload!.holder, r.payload!.expiresAt, r.payload!.plan)
+    } catch (e: any) { setMsg(e?.message || 'Não foi possível ativar. Tente de novo.'); show(e?.message || 'Não foi possível ativar.') }
   }
   const activateAuto = async () => {
     if (!licenseApiConfigured) { setMsg('Ativação automática ainda não foi configurada. Use a chave manual abaixo.'); return }
@@ -815,7 +818,7 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
       <section className="pro-hero">
         <Crown size={30} /><div className="font-extrabold text-2xl mt-2">Você é Pro!</div>
         <p className="opacity-90 text-sm mt-1">Titular: {pro.holder || '—'} • Plano: {pro.plan === 'lifetime' ? 'Vitalício' : 'Mensal'} • Válido até {pro.expiresAt ? new Date(pro.expiresAt).toLocaleDateString('pt-BR') : '—'} {pro.expiresAt && <>(faltam {proDaysLeft(pro)} dias)</>}</p>
-        <div className="flex gap-2 flex-wrap mt-4"><a className="btn-white" href={checkout} target="_blank" rel="noreferrer">Renovar na Cakto <ExternalLink size={15} /></a><button className="btn-ghost" onClick={async () => { await setSetting('activated', '0'); await setSetting('licenseKey', ''); await reload(); show('Pro desativado neste aparelho') }}>Desativar neste aparelho</button></div>
+        <div className="flex gap-2 flex-wrap mt-4"><a className="btn-white" href={checkout} target="_blank" rel="noreferrer">Renovar na Cakto <ExternalLink size={15} /></a><button className="btn-ghost" onClick={async () => { try { await setSetting('activated', '0'); await setSetting('licenseKey', ''); await reload(); show('Pro desativado neste aparelho') } catch (e:any) { show(e?.message || 'Não foi possível desativar.') } }}>Desativar neste aparelho</button></div>
       </section>
     ) : (
       <section className="pro-hero">
@@ -854,7 +857,7 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
   </div>
 }
 
-function Config({ userId, name, setName, dark, setDark, categories, reload, show, tx, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, pro, auth, syncState, runSync }: any) {
+function Config({ userId, name, setName, dark, setDark, categories, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, pro, auth, syncState, runSync, enqueueDelete }: any) {
   const [catName, setCatName] = useState(''); const [catType, setCatType] = useState<'in' | 'out'>('out')
   return <div className="space-y-5 max-w-xl">
     <section className="card p-6 space-y-4">
@@ -887,27 +890,28 @@ function Config({ userId, name, setName, dark, setDark, categories, reload, show
       <div className="flex gap-2 flex-wrap">
         <input className="input flex-1 min-w-[140px]" placeholder="Nova categoria" value={catName} onChange={e => setCatName(e.target.value)} />
         <select className="input !w-auto" value={catType} onChange={e => setCatType(e.target.value as any)}><option value="out">Saída</option><option value="in">Entrada</option></select>
-        <button className="btn" onClick={async () => { if (!catName.trim()) return show('Informe o nome da categoria'); await addCategory(catName.trim(), catType, userId); await reload(); setCatName(''); show('Categoria criada') }}><Plus size={16} /> Criar</button>
+        <button className="btn" onClick={async () => { if (!catName.trim()) return show('Informe o nome da categoria'); try { await addCategory(catName.trim(), catType, userId); await reload(); setCatName(''); show('Categoria criada') } catch (e:any) { show(e?.message || 'Não foi possível salvar.') } }}><Plus size={16} /> Criar</button>
       </div>
-      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (confirm(`Apagar a categoria ${c.name}?`)) { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
+      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!confirm(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
     </section>
     <section className="card p-6 space-y-4">
       <h2 className="font-bold">Seus dados</h2>
       <div className="flex gap-2 flex-wrap">
-        <button className="btn-ghost" onClick={async () => { const b = await exportBackup(); const u = URL.createObjectURL(new Blob([b as any], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-backup.db'; a.click(); show('Cópia baixada') }}><Download size={15} /> Baixar cópia</button>
-        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Restaurar cópia<input type="file" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; await importBackup(new Uint8Array(await f.arrayBuffer())); await reload(); show('Dados restaurados') }} /></label>
-        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar planilha CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; const rows = parseCsvImport(await f.text()); if (!rows.length) return show('Nenhum lançamento válido encontrado na planilha'); for (const r of rows) await addTransaction({ ...r, userId }); await reload(); show(`${rows.length} lançamento(s) importado(s)`) }} /></label>
+        <button className="btn-ghost" onClick={async () => { try { const b = await exportBackup(); const u = URL.createObjectURL(new Blob([b as any], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-backup.db'; a.click(); show('Cópia baixada') } catch (e:any) { show(e?.message || 'Não foi possível baixar a cópia.') } }}><Download size={15} /> Baixar cópia</button>
+        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Restaurar cópia<input type="file" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importBackup(new Uint8Array(await f.arrayBuffer())); await reload(); show('Dados restaurados') } catch (err:any) { show(err?.message || 'Não foi possível restaurar.') } }} /></label>
+        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar planilha CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const rows = parseCsvImport(await f.text()); if (!rows.length) return show('Nenhum lançamento válido encontrado na planilha'); for (const r of rows) await addTransaction({ ...r, userId }); await reload(); show(`${rows.length} lançamento(s) importado(s)`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
       </div>
       <p className="muted text-xs">Planilha CSV no formato: Data;Descrição;Tipo;Categoria;Valor (o mesmo que o app exporta). A cópia completa guarda tudo em um arquivo só — ela também contém sua licença e dados financeiros, então guarde em local seguro.</p>
     </section>
     <section className="card p-6 space-y-3" style={{ borderColor: '#FECDD3' }}>
       <h2 className="font-bold text-rose-600">Zona de perigo</h2>
       <p className="muted text-sm">Apaga todos os movimentos, contas, metas, limites e recorrências deste aparelho. Não tem como desfazer.</p>
-      <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Tem certeza? Todos os seus dados serão apagados.')) return; if (!confirm('Última chance: apagar tudo mesmo?')) return; await clearAllData(uid); await reload(); show('Todos os dados foram apagados') }}><Trash2 size={15} /> Apagar todos os meus dados</button>
+      <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Tem certeza? Todos os seus dados serão apagados.')) return; if (!confirm('Última chance: apagar tudo mesmo?')) return; try { await clearAllData(userId); await reload(); show('Todos os dados foram apagados') } catch (e:any) { show(e?.message || 'Não foi possível apagar.') } }}><Trash2 size={15} /> Apagar todos os meus dados</button>
     </section>
     <section className="card p-6">
       <div className="font-bold text-sm">Sobre o NoAzul</div>
       <p className="muted text-sm mt-1 leading-relaxed">O NoAzul mantém suas finanças no azul: registre o que entra e sai, veja quanto sobra, acompanhe contas fixas, limites, recorrências e metas. Feito para pessoas comuns, sem jargão. Funciona no navegador e pode virar app de desktop.</p>
+      <div className="flex gap-4 mt-3 text-sm"><a className="link" href="/termos.html" target="_blank" rel="noreferrer">Termos de Uso</a><a className="link" href="/privacidade.html" target="_blank" rel="noreferrer">Política de Privacidade</a><a className="link" href="mailto:suporte@noazul.app.br">Suporte</a></div>
     </section>
   </div>
 }
