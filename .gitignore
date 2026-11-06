@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+tools/private.key.pem
+*.pem
+server/.wrangler/
+server/wrangler.toml
+.dev.vars
+.env
+.env.*
+!.env.example

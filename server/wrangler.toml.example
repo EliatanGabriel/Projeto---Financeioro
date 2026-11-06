@@ -1,0 +1,20 @@
+# Copie para wrangler.toml e ajuste o KV id após criar o namespace.
+name = "noazul-license"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+id = "COLE_O_ID_DO_KV_AQUI"
+binding = "LICENSES"
+
+[[durable_objects.bindings]]
+name = "LICENSE_DO"
+class_name = "LicenseStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LicenseStore"]
+
+# Segredos: NÃO coloque aqui. Defina com:
+#   wrangler secret put CAKTO_WEBHOOK_SECRET
+#   wrangler secret put PRIVATE_KEY_PEM   (conteúdo de ../tools/private.key.pem)
