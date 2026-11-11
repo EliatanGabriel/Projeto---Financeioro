@@ -31,14 +31,40 @@ h1,h2,h3,h4,h5,h6{font-weight:700;letter-spacing:-.02em}
 .muted{color:var(--muted)}
 .label{display:block;font-size:.78rem;font-weight:700;margin-bottom:.35rem}
 .input{width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.65rem .8rem;font-size:.95rem;color:var(--text);outline:none}
-.Input{width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.65rem .8rem;font-size:.95rem;color:var(--text);outline:none}
-.Input:focus{border-color:var(--brand-accent);box-shadow:0 0 0 3px rgba(16,185,129,.16)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;background:linear-gradient(135deg,var(--brand-accent),var(--brand));color:#fff;border-radius:14px;padding:.65rem 1.15rem;font-weight:700;font-size:.92rem;box-shadow:0 8px 20px rgba(16,185,129,.22)}
-.btn:hover{filter:brightness(1.08)}
-.btn-white{display:inline-flex;align-items:center;gap:.45rem;background:#fff;color:var(--brand);border-radius:14px;padding:.65rem 1.15rem;font-weight:700;font-size:.92rem}
-.btn-ghost{display:inline-flex;align-items:center;gap:.45rem;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.6rem 1rem;font-weight:600;font-size:.88rem;color:var(--muted)}
-.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:var(--card);border:1.5px solid var(--border);color:var(--text)}
-.link{color:var(--brand-accent);font-weight:700;font-size:.88rem}
+.Input{width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.65rem .8rem;font-size:.95rem;color:var(--text);outline:none;transition:border-color .2s,box-shadow .2s}
+.Input:focus{border-color:var(--brand-accent);box-shadow:0 0 0 3px rgba(16,185,129,.16);outline:none}
+.Input:focus-visible{border-color:var(--brand-accent);box-shadow:0 0 0 3px rgba(16,185,129,.16),0 0 0 1px rgba(16,185,129,.4)}
+.Input:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;background:linear-gradient(135deg,var(--brand-accent),var(--brand));color:#fff;border-radius:14px;padding:.65rem 1.15rem;font-weight:700;font-size:.92rem;box-shadow:0 4px 12px rgba(16,185,129,.22);transition:transform .15s,box-shadow .15s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,185,129,.35)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--brand-accent);outline-offset:2px}
+.btn-white{display:inline-flex;align-items:center;gap:.45rem;background:#fff;color:var(--brand);border-radius:14px;padding:.65rem 1.15rem;font-weight:700;font-size:.92rem;transition:box-shadow .15s}
+.btn-white:hover{box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.btn-ghost{display:inline-flex;align-items:center;gap:.45rem;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.6rem 1rem;font-weight:600;font-size:.88rem;color:var(--muted);transition:background .15s,border-color .15s}
+.btn-ghost:hover{background:var(--bg);border-color:var(--brand-accent)}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:var(--card);border:1.5px solid var(--border);color:var(--text);transition:background .15s,border-color .15s}
+.iconbtn:hover{background:var(--bg);border-color:var(--brand-accent)}
+.link{color:var(--brand-accent);font-weight:700;font-size:.88rem;text-decoration:none;transition:text-decoration .15s}
+.link:hover{text-decoration:underline}
+
+/* ========== Enhanced forms ========== */
+.form-group{margin-bottom:1rem}
+.form-label{display:block;font-size:.875rem;font-weight:600;margin-bottom:.4rem;color:var(--text)}
+.form-label-small{font-size:.75rem;color:var(--muted);margin-bottom:.2rem}
+
+/* ========== Enhanced inputs ========== */
+.input{width:100%;padding:.75rem 1rem;font-size:.95rem;color:var(--text);background:var(--card);border:2px solid var(--border);border-radius:12px;transition:border-color .2s,box-shadow .2s}
+.input:focus{border-color:var(--brand-accent);box-shadow:0 0 0 4px rgba(16,185,129,.12)}
+.input:focus-visible{outline:2px solid var(--brand-accent);outline-offset:2px}
+.input::placeholder{color:var(--muted);opacity:1}
+.input:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
+
+/* ========== Enhanced progress ========== */
+.progress{height:12px;border-radius:999px;overflow:hidden;margin:.5rem 0}
+.progress>div{height:100%;border-radius:999px;transition:width .3s ease}
+.progress>div span{position:absolute;right:0;top:50%;transform:translateY(-50%);font-size:.7rem;min-width:4rem;text-align:right;color:var(--muted)}
+.progress .label{position:absolute;left:0;top:50%;transform:translateY(-50%);font-size:.7rem;color:var(--muted)}
 .logo-mark{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,var(--brand-accent),var(--brand));box-shadow:0 8px 18px rgba(16,185,129,.28)}
 .navlink{display:flex;align-items:center;gap:.7rem;width:100%;padding:.65rem .8rem;border-radius:14px;font-size:.93rem;font-weight:600;color:var(--muted)}
 .navlink[data-active="true"]{background:linear-gradient(135deg,var(--brand-accent),var(--brand));color:#fff}
@@ -72,11 +98,13 @@ h1,h2,h3,h4,h5,h6{font-weight:700;letter-spacing:-.02em}
 .hero-value span{color:var(--muted);font-size:.85rem;font-weight:400;letter-spacing:0}
 
 /* ========== NEW: Modern stats cards ========== */
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:1.5rem 2rem;box-shadow:0 4px 12px rgba(0,0,0,.04);transition:transform .2s,box-shadow .2s}
-.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.08)}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:1.5rem 2rem;box-shadow:0 2px 8px rgba(0,0,0,.04);transition:transform .2s,box-shadow .2s,background .2s}
+.stat-card:hover{transform:translateY(-4px);box-shadow:0 12px 32px rgba(0,0,0,.08);background:var(--bg)}
 .stat-card.light{border-color:var(--border)}
 .stat-card.light:hover{border-color:var(--brand-accent)}
-.stat-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.25rem}
+.stat-card.light:hover>div:last-child{border-color:var(--brand-accent)}
+.stat-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.25rem;transition:transform .2s}
+.stat-card:hover .stat-icon{transform:scale(1.1)}
 .stat-icon.up{background:rgba(16,185,129,.15);color:var(--brand-accent)}
 .stat-icon.down{background:rgba(239,68,68,.15);color:#EF4443}
 .stat-icon.neutral{background:rgba(245,158,11,.15);color:#F59E0B}
@@ -87,15 +115,12 @@ h1,h2,h3,h4,h5,h6{font-weight:700;letter-spacing:-.02em}
 .stat-change.up{color:var(--brand-accent)}
 .stat-change.down{color:#EF4443}
 
-/* ========== NEW: Modern section headers ========== */
-.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
-.section-header h2{font-size:1.25rem;font-weight:800;color:var(--text)}
-.section-header .view-all{font-size:.8rem;color:var(--brand-accent);font-weight:600;text-transform:uppercase}
-
-/* ========== NEW: Modern pill badges ========== */
-.pill{display:inline-block;padding:.4rem .8rem;border-radius:999px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+/* ========== Enhanced pills ========== */
+.pill{display:inline-block;padding:.4rem .8rem;border-radius:999px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;transition:background .2s,color .2s,transform .15s}
 .pill-primary{background:var(--brand-accent);color:#fff}
+.pill-primary:hover{transform:translateY(-1px)}
 .pill-secondary{background:var(--card);border:1px solid var(--brand-accent);color:var(--brand-accent)}
+.pill-secondary:hover{border-color:#0f172a;color:#0f172a}
 .pill-success{background:var(--brand-accent);color:#fff}
 .pill-warning{background:#F59E0B;color:#1F2937}
 .pill-danger{background:#EF4443;color:#F9FAFB}
