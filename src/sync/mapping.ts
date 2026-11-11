@@ -55,7 +55,7 @@ export function toRemoteRow(entity: SyncEntity, row: SyncRow): Record<string, an
     if (row[field] === undefined) continue
     out[REMOTE_OF[field] || field] = row[field]
   }
-  if (row.version !== undefined && !NATURAL.has(entity)) out.version = row.version
+  if (row.version !== undefined) out.version = row.version
   return out
 }
 
