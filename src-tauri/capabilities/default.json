@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capacidade padrão do NoAzul (janela principal, sem plugins nativos).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+src-tauri/target/
+src-tauri/gen/schemas/
 tools/private.key.pem
 *.pem
 server/.wrangler/

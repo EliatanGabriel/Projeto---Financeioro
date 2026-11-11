@@ -8,11 +8,15 @@ Registre o que entra e sai, veja quanto sobra no mês, acompanhe contas fixas e 
 
 ```bash
 npm install
-npm run dev    # http://localhost:5173
-npm test       # 37 testes
-npm run build  # gera dist/
+npm run dev         # http://localhost:5173
+npm test            # 130 testes
+npm run build       # gera dist/
 npm run preview
+npm run tauri:dev   # app de desktop (Tauri v2)
+npm run tauri:build # instalador (msi/exe, dmg ou deb/rpm/AppImage)
 ```
+
+Pré-requisitos do desktop (Rust + dependências do sistema) em `docs/INSTALACAO.md`.
 
 ## O que tem
 

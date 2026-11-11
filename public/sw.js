@@ -1,7 +1,7 @@
 // NoAzul PWA service worker — cache-first para assets estáticos, network-first para HTML.
 // Dados financeiros (sql.js/localStorage) NÃO passam por aqui.
 // v2: invalida cache v1 que envenenou sql-wasm-browser.wasm com HTML (index.html).
-const CACHE = 'noazul-v2';
+const CACHE = 'noazul-v3';
 const CORE = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg'];
 
 self.addEventListener('install', (e) => {
