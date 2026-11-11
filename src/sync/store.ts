@@ -1,14 +1,16 @@
 import * as db from '../database/db'
 import { canonicalHash } from './engine'
+import { stableId } from './mapping'
 import type { SyncEntity, SyncRow, SyncQueueOp, SyncConflict } from './engine'
 
-export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions']
+export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions','credit_cards','credit_card_purchases','credit_card_payments']
 
 const LISTERS: Record<string, (u: string) => Promise<any[]>> = {
   transactions: u => db.listTransactions(u), fixed_bills: u => db.listFixedBills(u), goals: u => db.listGoals(u),
   budgets: u => db.listBudgets(u), bill_payments: u => db.listBillPayments(u), recurrences: u => db.listRecurrences(u),
   recurrence_launches: u => db.listRecurrenceLaunches(u), categories: u => db.listCategories(u),
   goal_auto_launches: u => db.listGoalAutoLaunches(u), investments: u => db.listInvestments(u), investment_transactions: u => db.listAllInvestmentTransactions(u),
+  credit_cards: u => db.listCreditCards(u), credit_card_purchases: u => db.listCreditCardPurchases(u), credit_card_payments: u => db.listCreditCardPayments(u),
 }
 const UPSERTS: Record<string, (row: any, u: string) => Promise<any>> = {
   transactions: (r, u) => db.addTransaction({ ...r, userId: u }), fixed_bills: (r, u) => db.upsertFixedBill({ ...r, userId: u }),
@@ -16,6 +18,8 @@ const UPSERTS: Record<string, (row: any, u: string) => Promise<any>> = {
   bill_payments: (r, u) => db.setBillPaid(r.billId, r.month, true, u).then(() => r), recurrences: (r, u) => db.upsertRecurrence({ ...r, userId: u }),
   recurrence_launches: (r, u) => db.markRecurrenceLaunched(r.recurrenceId, r.month, u).then(() => r), categories: (r, u) => db.addCategory(r.name, r.type, u).then(() => r),
   goal_auto_launches: (r, u) => db.markGoalAutoLaunched(r.goalId, r.month, u).then(() => r), investments: (r, u) => db.upsertInvestment({ ...r, userId: u }),
+  credit_cards: (r, u) => db.upsertCreditCard({ ...r, userId: u }), credit_card_purchases: (r, u) => db.upsertCreditCardPurchase({ ...r, userId: u }),
+  credit_card_payments: (r, u) => db.setCreditCardPaid(r.cardId, r.month, true, u).then(() => r),
   investment_transactions: async (r, u) => { const invs = await db.listInvestments(u); const inv = invs.find((i: any) => i.id === r.investmentId); if (!inv) throw new Error('Investimento não encontrado para este usuário'); const { applyTransactionDetailed, reverseTransaction } = await import('../calculations/investments'); const existing = await db.getInvestmentTransaction(r.id, u); let base: any = inv; if (existing && existing.investmentId === r.investmentId) { const same = existing.type === r.type && Math.abs(existing.amount - (r.amount || 0)) < 0.005 && Math.abs((existing.quantity || 0) - (r.quantity || 0)) < 1e-8 && Math.abs((existing.unitPrice || 0) - (r.unitPrice || 0)) < 0.005 && existing.date === r.date && (existing.description || '') === (r.description || ''); if (same) return existing; base = reverseTransaction(inv, existing) } const { investment: updated, costRemoved, realizedGain } = applyTransactionDetailed(base, r); return db.addInvestmentTransaction({ ...r, costRemoved, realizedGain }, updated) },
 }
 const DELETES: Record<string, (id: string, u: string) => Promise<any>> = {
@@ -23,13 +27,15 @@ const DELETES: Record<string, (id: string, u: string) => Promise<any>> = {
   budgets: (id, u) => db.setBudget(id, 0, u), bill_payments: (_id, _u) => Promise.resolve(), recurrences: (id, u) => db.deleteRecurrence(id, u),
   recurrence_launches: (_id, _u) => Promise.resolve(), categories: (_id, _u) => Promise.resolve(), goal_auto_launches: (_id, _u) => Promise.resolve(),
   investments: (id, u) => db.deleteInvestment(id, u), investment_transactions: (_id, _u) => Promise.resolve(),
+  credit_cards: (id, u) => db.deleteCreditCard(id, u), credit_card_purchases: (id, u) => db.deleteCreditCardPurchase(id, u),
+  credit_card_payments: (id, u) => { const i = id.lastIndexOf(':'); return i < 0 ? Promise.resolve() : db.setCreditCardPaid(id.slice(0, i), id.slice(i + 1), false, u) },
 }
 
 export function makeSyncStore(userId: string) {
   return {
     async listLocal(entity: SyncEntity): Promise<SyncRow[]> {
       const rows = await LISTERS[entity](userId)
-      return rows.map((r: any, i: number) => ({ ...r, id: r.id ?? `${entity}-${i}`, userId, version: 1 }))
+      return rows.map((r: any) => ({ ...r, id: stableId(entity, r), userId, version: 1 }))
     },
     async replaceLocal(entity: SyncEntity, rows: SyncRow[]) {
       for (const row of rows) {

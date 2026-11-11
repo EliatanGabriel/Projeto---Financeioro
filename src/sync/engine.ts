@@ -3,14 +3,19 @@
  * detecção de conflitos e política de retry — sem depender de rede ou do Supabase.
  * O adaptador real (Supabase) injeta fetchAll/upsert/softDelete; testes injetam um fake.
  */
-export type SyncEntity = 'transactions'|'fixed_bills'|'goals'|'budgets'|'bill_payments'|'recurrences'|'recurrence_launches'|'categories'|'goal_auto_launches'|'investments'|'investment_transactions'
-export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions']
+export type SyncEntity = 'transactions'|'fixed_bills'|'goals'|'budgets'|'bill_payments'|'recurrences'|'recurrence_launches'|'categories'|'goal_auto_launches'|'investments'|'investment_transactions'|'credit_cards'|'credit_card_purchases'|'credit_card_payments'
+export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions','credit_cards','credit_card_purchases','credit_card_payments']
 export interface SyncRow { id: string; userId: string; updatedAt?: string; version?: number; deletedAt?: string | null; [k: string]: any }
 export interface SyncQueueOp { opId: string; entity: SyncEntity; recordId: string; op: 'upsert' | 'delete'; payload: any; baseVersion: number; userId?: string; attempts: number; nextRetryAt: string | null; createdAt: string }
 export interface SyncConflict { id: string; entity: SyncEntity; recordId: string; local: any; remote: any; localVersion: number; remoteVersion: number; createdAt: string; resolvedAt: string | null }
 
 export function canonicalHash(row: any): string {
-  const canon = (x: any): string => x === null || typeof x !== 'object' ? JSON.stringify(x) : Array.isArray(x) ? `[${x.map(canon).join(',')}]` : `{${Object.keys(x).sort().filter(k => k !== '__sync').map(k => `${JSON.stringify(k)}:${canon(x[k])}`).join(',')}}`
+  const canon = (x: any): string => {
+    if (x === null || x === undefined || x === '') return '""'
+    if (typeof x === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(x)) { const t = Date.parse(x); if (!Number.isNaN(t)) return JSON.stringify(new Date(t).toISOString()) }
+    if (typeof x !== 'object') return JSON.stringify(x)
+    return Array.isArray(x) ? `[${x.map(canon).join(',')}]` : `{${Object.keys(x).sort().filter(k => k !== '__sync' && k !== 'version' && k !== 'updatedAt' && k !== 'deletedAt').map(k => `${JSON.stringify(k)}:${canon(x[k])}`).join(',')}}`
+  }
   let h1 = 5381, h2 = 52711
   const s = canon(row)
   for (let i = 0; i < s.length; i++) { h1 = ((h1 << 5) + h1 + s.charCodeAt(i)) >>> 0; h2 = ((h2 << 5) + h2 + s.charCodeAt(i)) >>> 0 }

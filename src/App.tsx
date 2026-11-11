@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck } from 'lucide-react'
-import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup, resolveSyncConflict } from './database/db'
+import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, CreditCard as CreditCardIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck } from 'lucide-react'
+import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup, resolveSyncConflict, listCreditCards, upsertCreditCard, deleteCreditCard, listCreditCardPurchases, upsertCreditCardPurchase, deleteCreditCardPurchase, listCreditCardPayments, setCreditCardPaid } from './database/db'
 import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
+import { cardSummary, cardColor } from './calculations/creditCards'
 import { brl, newId, num } from './utils/format'
+import { parseReminderSettings, dueBills, reminderMessage, reminderFingerprint, requestNotifications, showReminderNotification, notificationPermission } from './utils/reminders'
+import type { ReminderSettings } from './utils/reminders'
+import { parseOfx, looksLikeOfx } from './utils/ofx'
 import { exportCSV, exportPDFReport, exportXLSX } from './utils/reports'
 import { summarize, monthlyHistory, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
 import { annualSummary, compareAnnual, financialScore, spendingTrend, proInsights } from './calculations/annual'
@@ -12,9 +16,9 @@ import { useAuth } from './auth/useAuth'
 import { SYNC_ENTITIES, canonicalHash, resolveConflict } from './sync/engine'
 import { legacyCounts, reassignLegacyUser } from './database/db'
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Legend } from 'recharts'
-import type { Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence, Category, Investment, InvestmentTransaction } from './types'
+import type { Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence, Category, Investment, InvestmentTransaction, CreditCard, CreditCardPurchase, CreditCardPayment } from './types'
 
-type Tab = 'inicio' | 'movimentos' | 'contas' | 'metas' | 'resumo' | 'investimentos' | 'pro' | 'perfil' | 'config'
+type Tab = 'inicio' | 'movimentos' | 'contas' | 'cartoes' | 'metas' | 'resumo' | 'investimentos' | 'pro' | 'perfil' | 'config'
 const ACCENTS: Record<string, { label: string; brand: string; dark: string }> = {
   esmeralda: { label: 'Verde (grátis)', brand: '#0E9F6E', dark: '#0F766E' },
   violeta: { label: 'Roxo (Pro)', brand: '#8B5CF6', dark: '#7C3AED' },
@@ -85,12 +89,16 @@ export default function App() {
   const [userId, setUserId] = useState('')
   const [investments, setInvestments] = useState<Investment[]>([])
   const [invTx, setInvTx] = useState<InvestmentTransaction[]>([])
+  const [cards, setCards] = useState<CreditCard[]>([])
+  const [cardPurchases, setCardPurchases] = useState<CreditCardPurchase[]>([])
+  const [cardPayments, setCardPayments] = useState<CreditCardPayment[]>([])
 
   const reload = async () => {
     let uid = authUser?.id || (await getSetting('userId'))
     if (!uid) { uid = getDeviceId(); await setSetting('userId', uid) }
     setUserId(uid)
     setInvestments(await listInvestments(uid)); setInvTx(await listAllInvestmentTransactions(uid))
+    setCards(await listCreditCards(uid)); setCardPurchases(await listCreditCardPurchases(uid)); setCardPayments(await listCreditCardPayments(uid))
     setTx(await listTransactions(uid)); setBills(await listFixedBills(uid)); setGoals(await listGoals(uid))
     setBudgets(await listBudgets(uid)); setPayments(await listBillPayments(uid))
     setRecurrences(await listRecurrences(uid)); setLaunches(await listRecurrenceLaunches(uid))
@@ -152,6 +160,29 @@ export default function App() {
     } catch {}
   })() }, [])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark) }, [dark])
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (cancelled) return
+      try {
+        const settings = parseReminderSettings(await getSetting('reminderSettings'))
+        if (!settings.enabled) return
+        const now = new Date()
+        if (now.getHours() < settings.hour) return
+        const items = dueBills(bills, payments, now, settings.daysBefore)
+        if (!items.length) return
+        const fingerprint = reminderFingerprint(items, now)
+        if (await getSetting('reminderLast') === fingerprint) return
+        const ok = await showReminderNotification('NoAzul: contas chegando', reminderMessage(items))
+        if (ok) await setSetting('reminderLast', fingerprint)
+      } catch { /* lembrete nunca quebra o app */ }
+    }
+    run()
+    const timer = setInterval(run, 30 * 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === 'visible') run() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { cancelled = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [bills, payments])
   useEffect(() => { const a = ACCENTS[accent] || ACCENTS.esmeralda; document.documentElement.style.setProperty('--brand', a.brand); document.documentElement.style.setProperty('--brand-dark', a.dark) }, [accent])
   const isPro = !!pro.activated
   const requirePro = () => { if (isPro) return true; setShowUpsell(true); return false }
@@ -185,7 +216,7 @@ export default function App() {
 
   const NAV: [Tab, string, any][] = [
     ['inicio', 'Início', Home], ['movimentos', 'Movimentos', ArrowLeftRight],
-    ['contas', 'Contas fixas', Receipt], ['metas', 'Metas', PiggyBank],
+    ['contas', 'Contas fixas', Receipt], ['cartoes', 'Cartões', CreditCardIcon], ['metas', 'Metas', PiggyBank],
     ['resumo', 'Resumo', BarChart3], ['investimentos', 'Investimentos', TrendingUp], ['pro', 'NoAzul Pro', Crown], ['perfil', 'Meu perfil', UserRound], ['config', 'Ajustes', SettingsIcon],
   ]
 
@@ -352,12 +383,13 @@ export default function App() {
 
           {tab === 'movimentos' && <Movimentos userId={uid} tx={tx} month={month} reload={reload} show={show} expenseCats={expenseCats} incomeCats={incomeCats} recurrences={recurrences} launches={launches} isPro={isPro} requirePro={requirePro} enqueueDelete={enqueueDelete} />}
           {tab === 'contas' && <Contas userId={uid} bills={bills} bsum={bsum} month={month} reload={reload} show={show} enqueueDelete={enqueueDelete} />}
+          {tab === 'cartoes' && <Cartoes userId={uid} cards={cards} purchases={cardPurchases} payments={cardPayments} month={month} expenseCats={expenseCats} reload={reload} show={show} enqueueDelete={enqueueDelete} />}
           {tab === 'metas' && <Metas userId={uid} goals={goals} reload={reload} show={show} isPro={isPro} requirePro={requirePro} enqueueDelete={enqueueDelete} />}
           {tab === 'resumo' && <Resumo userId={uid} s={s} history={history12} tx={tx} month={month} budgets={budgets} bstatus={bstatus} fc={fc} expenseCats={expenseCats} reload={reload} show={show} goals={goals} isPro={isPro} requirePro={requirePro} />}
           {tab === 'investimentos' && <Investimentos userId={uid} investments={investments} allTx={invTx} reload={reload} show={show} />}
           {tab === 'pro' && <ProView pro={pro} checkout={checkout} checkoutConfigured={isCheckoutConfigured(checkout)} licenseApi={licenseApi} licenseApiConfigured={isLicenseApiConfigured(licenseApi)} reload={reload} show={show} goTab={setTab} />}
           {tab === 'perfil' && <Perfil auth={auth} name={name} setName={setName} show={show} isPro={isPro} pro={pro} goPro={() => setTab('pro')} syncState={syncState} runSync={runSync} checkout={checkout} />}
-          {tab === 'config' && <Config userId={uid} dark={dark} setDark={setDark} categories={categories} reload={reload} show={show} tx={tx} isPro={isPro} accent={accent} setAccent={setAccent} requirePro={requirePro} checkoutUrl={checkoutUrl} setCheckoutUrl={setCheckoutUrl} licenseApiUrl={licenseApiUrl} setLicenseApiUrl={setLicenseApiUrl} goPro={() => setTab('pro')} goPerfil={() => setTab('perfil')} pro={pro} enqueueDelete={enqueueDelete} />}
+          {tab === 'config' && <Config userId={uid} dark={dark} setDark={setDark} categories={categories} bills={bills} payments={payments} reload={reload} show={show} tx={tx} isPro={isPro} accent={accent} setAccent={setAccent} requirePro={requirePro} checkoutUrl={checkoutUrl} setCheckoutUrl={setCheckoutUrl} licenseApiUrl={licenseApiUrl} setLicenseApiUrl={setLicenseApiUrl} goPro={() => setTab('pro')} goPerfil={() => setTab('perfil')} pro={pro} enqueueDelete={enqueueDelete} />}
         </main>
       </div>
 
@@ -507,6 +539,101 @@ function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: any
         </div>
       ))}
     </section>
+  </div>
+}
+
+function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reload, show, enqueueDelete }: any) {
+  const [selectedId, setSelectedId] = useState('')
+  const [cardForm, setCardForm] = useState<any>({ name: '', brand: '', limit: '', closingDay: '5', dueDay: '12', color: '#0E9F6E' })
+  const [editingCard, setEditingCard] = useState<string | null>(null)
+  const [purchaseForm, setPurchaseForm] = useState<any>({ description: '', category: 'Outros', total: '', installments: '1', firstDate: new Date().toISOString().slice(0, 10), notes: '' })
+  const selected = cards.find((c: any) => c.id === selectedId) || cards[0]
+  const sum = selected ? cardSummary(selected, purchases, payments, month) : null
+  const resetCard = () => { setEditingCard(null); setCardForm({ name: '', brand: '', limit: '', closingDay: '5', dueDay: '12', color: '#0E9F6E' }) }
+  const saveCard = async () => {
+    if (!cardForm.name.trim() || !num(cardForm.limit)) return show('Informe o nome e o limite do cartão')
+    const id = editingCard || newId()
+    try {
+      await upsertCreditCard({ id, userId, name: cardForm.name.trim(), brand: cardForm.brand.trim(), limitAmount: num(cardForm.limit), closingDay: Number(cardForm.closingDay) || 5, dueDay: Number(cardForm.dueDay) || 12, color: cardForm.color, createdAt: new Date().toISOString() })
+      await reload(); setSelectedId(id); resetCard(); show('Cartão salvo')
+    } catch (e: any) { show(e?.message || 'Não foi possível salvar o cartão.') }
+  }
+  const editCard = (c: any) => { setEditingCard(c.id); setCardForm({ name: c.name, brand: c.brand || '', limit: String(c.limitAmount).replace('.', ','), closingDay: String(c.closingDay), dueDay: String(c.dueDay), color: cardColor(c) }) }
+  const removeCard = async (c: any) => {
+    if (!confirm(`Apagar o cartão ${c.name} e suas compras?`)) return
+    try {
+      for (const p of purchases.filter((x: any) => x.cardId === c.id)) enqueueDelete('credit_card_purchases', p)
+      enqueueDelete('credit_cards', c)
+      await deleteCreditCard(c.id, userId); setSelectedId(''); await reload(); show('Cartão apagado')
+    } catch (e: any) { show(e?.message || 'Não foi possível excluir.') }
+  }
+  const addPurchase = async () => {
+    if (!selected) return show('Cadastre um cartão primeiro')
+    if (!purchaseForm.description.trim() || !num(purchaseForm.total)) return show('Informe a descrição e o valor da compra')
+    try {
+      await upsertCreditCardPurchase({ id: newId(), userId, cardId: selected.id, description: purchaseForm.description.trim(), category: purchaseForm.category || 'Outros', totalAmount: num(purchaseForm.total), installments: Math.max(1, Number(purchaseForm.installments) || 1), firstDate: purchaseForm.firstDate, notes: purchaseForm.notes || '', createdAt: new Date().toISOString() })
+      await reload(); setPurchaseForm({ description: '', category: 'Outros', total: '', installments: '1', firstDate: new Date().toISOString().slice(0, 10), notes: '' }); show('Compra adicionada')
+    } catch (e: any) { show(e?.message || 'Não foi possível salvar a compra.') }
+  }
+  return <div className="space-y-5">
+    <section className="card p-5 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-bold text-lg">{editingCard ? 'Editar cartão' : 'Cartões de crédito'}</h2><p className="muted text-sm">Acompanhe limite, fatura e compras parceladas.</p></div>{editingCard && <button className="btn-ghost" onClick={resetCard}>Cancelar edição</button>}</div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+        <Field label="Nome do cartão" value={cardForm.name} onChange={(v: any) => setCardForm({ ...cardForm, name: v })} placeholder="Ex.: Nubank" />
+        <Field label="Bandeira" value={cardForm.brand} onChange={(v: any) => setCardForm({ ...cardForm, brand: v })} placeholder="Visa, Master..." />
+        <Field label="Limite (R$)" value={cardForm.limit} onChange={(v: any) => setCardForm({ ...cardForm, limit: v })} placeholder="0,00" />
+        <Field label="Fecha dia" value={cardForm.closingDay} onChange={(v: any) => setCardForm({ ...cardForm, closingDay: v })} type="number" />
+        <Field label="Vence dia" value={cardForm.dueDay} onChange={(v: any) => setCardForm({ ...cardForm, dueDay: v })} type="number" />
+        <div><div className="label">Cor</div><div className="chips">{['#0E9F6E', '#2563EB', '#7C3AED', '#DB2777', '#EA580C', '#0F172A'].map(c => <button key={c} className="chip" data-active={cardForm.color === c} onClick={() => setCardForm({ ...cardForm, color: c })} aria-label={'Cor ' + c}><span className="swatch" style={{ background: c }} /></button>)}</div></div>
+      </div>
+      <div className="flex gap-2 mt-4 flex-wrap"><button className="btn" onClick={saveCard}><Plus size={17} /> {editingCard ? 'Salvar alterações' : 'Salvar cartão'}</button></div>
+    </section>
+
+    {!cards.length ? <section className="card p-5"><Empty text="Nenhum cartão cadastrado. Adicione um para controlar as faturas." /></section> : <>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {cards.map((c: any) => { const sm = cardSummary(c, purchases, payments, month); return <button key={c.id} onClick={() => setSelectedId(c.id)} className="card p-5 text-left relative overflow-hidden" style={{ background: 'linear-gradient(135deg, ' + cardColor(c) + ', #0f172a)', color: '#fff', border: selected?.id === c.id ? '2px solid #fff' : '1px solid transparent' }}>
+          <div className="flex items-start justify-between gap-2"><div><div className="font-extrabold text-lg">{c.name}</div><div className="text-xs opacity-80">{c.brand || 'Cartão de crédito'} • fecha dia {c.closingDay}</div></div><CreditCardIcon size={22} /></div>
+          <div className="mt-5 text-xs opacity-80 uppercase font-bold">Fatura de {monthLabel(month)}</div>
+          <div className="text-2xl font-extrabold">{brl(sm.invoice.total)}</div>
+          <div className="text-xs opacity-80 mt-1">Vence {new Date(sm.invoice.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}{sm.invoice.paid ? ' • paga' : ''}</div>
+          <div className="mt-3 text-xs opacity-90">Disponível {brl(sm.available)} de {brl(sm.limit)}</div>
+          <div className="progress mt-1" style={{ background: 'rgba(255,255,255,.25)' }}><div style={{ width: sm.usedPct + '%', background: '#fff' }} /></div>
+        </button> })}
+      </div>
+
+      {selected && sum && <section className="card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h2 className="font-bold">Fatura de {monthLabel(month)} — {selected.name}</h2><p className="muted text-sm">Vence em {new Date(sum.invoice.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')} • {sum.invoice.items.length} compra(s)</p></div>
+          <div className="flex gap-2 items-center">
+            <label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={sum.invoice.paid} onChange={async e => { try { await setCreditCardPaid(selected.id, month, e.target.checked, userId); if (!e.target.checked) enqueueDelete('credit_card_payments', { id: selected.id + ':' + month, cardId: selected.id, month, userId }); await reload(); show(e.target.checked ? 'Fatura marcada como paga' : 'Fatura reaberta') } catch (err: any) { show(err?.message || 'Não foi possível salvar.') } }} /> Paga</label>
+            <button className="iconbtn" aria-label="Editar cartão" onClick={() => editCard(selected)}><Pencil size={15} /></button>
+            <button className="iconbtn" aria-label="Apagar cartão" onClick={() => removeCard(selected)}><Trash2 size={15} /></button>
+          </div>
+        </div>
+        <div className="mt-3 flex items-end justify-between gap-3"><div><div className="muted text-xs font-bold uppercase">Total da fatura</div><div className="text-2xl font-extrabold">{brl(sum.invoice.total)}</div></div><div className="text-right text-sm"><div className="muted">Em aberto (limite)</div><b>{brl(sum.outstanding)}</b></div></div>
+        <div className="mt-4 border-t pt-3 space-y-2" style={{ borderColor: 'var(--border)' }}>
+          {sum.invoice.items.length ? sum.invoice.items.map((it: any) => <div key={it.purchase.id + ':' + it.installment.number} className="flex items-center gap-3 text-sm">
+            <div className="tx-icon out"><CreditCardIcon size={15} /></div>
+            <div className="flex-1 min-w-0"><div className="font-bold truncate">{it.purchase.description}</div><div className="muted text-xs">{it.purchase.category} • parcela {it.installment.number}/{it.purchase.installments} • compra em {new Date(it.purchase.firstDate + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
+            <b className="shrink-0">{brl(it.installment.amount)}</b>
+            <button className="iconbtn" aria-label="Apagar compra" onClick={async () => { if (!confirm('Apagar esta compra e todas as parcelas?')) return; try { await deleteCreditCardPurchase(it.purchase.id, userId); enqueueDelete('credit_card_purchases', it.purchase); await reload() } catch (e: any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={14} /></button>
+          </div>) : <p className="muted text-sm">Nenhuma compra nesta fatura.</p>}
+        </div>
+        <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+          <h3 className="font-bold">Adicionar compra</h3>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+            <Field label="Descrição" value={purchaseForm.description} onChange={(v: any) => setPurchaseForm({ ...purchaseForm, description: v })} placeholder="Ex.: Mercado" />
+            <div><div className="label">Categoria</div><select className="input" value={purchaseForm.category} onChange={e => setPurchaseForm({ ...purchaseForm, category: e.target.value })}>{expenseCats.map((c: string) => <option key={c} value={c}>{c}</option>)}</select></div>
+            <Field label="Valor total (R$)" value={purchaseForm.total} onChange={(v: any) => setPurchaseForm({ ...purchaseForm, total: v })} placeholder="0,00" />
+            <Field label="Parcelas" value={purchaseForm.installments} onChange={(v: any) => setPurchaseForm({ ...purchaseForm, installments: v })} type="number" />
+            <Field label="Data da compra" value={purchaseForm.firstDate} onChange={(v: any) => setPurchaseForm({ ...purchaseForm, firstDate: v })} type="date" />
+            <Field label="Observação" value={purchaseForm.notes} onChange={(v: any) => setPurchaseForm({ ...purchaseForm, notes: v })} placeholder="Opcional" />
+          </div>
+          {num(purchaseForm.total) > 0 && Number(purchaseForm.installments) > 1 && <p className="muted text-xs mt-2">Aproximadamente {brl(num(purchaseForm.total) / Math.max(1, Number(purchaseForm.installments)))} por mês.</p>}
+          <button className="btn mt-3" onClick={addPurchase}><Plus size={16} /> Adicionar compra</button>
+        </div>
+      </section>}
+    </>}
   </div>
 }
 
@@ -1049,8 +1176,14 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
   </div>
 }
 
-function Config({ userId, dark, setDark, categories, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, goPerfil, pro, enqueueDelete }: any) {
+function Config({ userId, dark, setDark, categories, bills, payments, tx, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, goPerfil, pro, enqueueDelete }: any) {
   const [catName, setCatName] = useState(''); const [catType, setCatType] = useState<'in' | 'out'>('out')
+  const [reminders, setReminders] = useState<ReminderSettings>({ enabled: false, daysBefore: 3, hour: 9 })
+  const [permission, setPermission] = useState<string>(notificationPermission())
+  useEffect(() => { getSetting('reminderSettings').then(v => setReminders(parseReminderSettings(v))) }, [])
+  const saveReminders = (patch: Partial<ReminderSettings>) => { const next = { ...reminders, ...patch }; setReminders(next); setSetting('reminderSettings', JSON.stringify(next)) }
+  const enableReminders = async (on: boolean) => { if (on) { const p = await requestNotifications(); setPermission(p); if (p === 'unsupported') return show('Este navegador não suporta notificações.'); if (p !== 'granted') return show('Permita notificações no navegador para receber lembretes.') } saveReminders({ enabled: on }) }
+  const preview = dueBills(bills || [], payments || [], new Date(), reminders.daysBefore)
   return <div className="space-y-5 max-w-xl">
     <section className="card p-6 flex items-center gap-3">
       <UserRound size={22} className="text-emerald-600" />
@@ -1081,14 +1214,29 @@ function Config({ userId, dark, setDark, categories, reload, show, isPro, accent
       {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!confirm(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
     </section>
     <section className="card p-6 space-y-4">
+      <h2 className="font-bold">Lembretes de contas</h2>
+      <p className="muted text-sm">Avisos do navegador quando uma conta fixa estiver perto de vencer. O lembrete aparece uma vez por dia com o app aberto.</p>
+      <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={reminders.enabled} onChange={e => enableReminders(e.target.checked)} /> Ativar lembretes</label>
+      <div className="flex gap-3 flex-wrap">
+        <label className="text-sm">Avisar com antecedência<select className="input mt-1" value={reminders.daysBefore} onChange={e => saveReminders({ daysBefore: Number(e.target.value) })}><option value={0}>No dia</option><option value={1}>1 dia</option><option value={3}>3 dias</option><option value={7}>7 dias</option><option value={14}>14 dias</option></select></label>
+        <label className="text-sm">Horário<select className="input mt-1" value={reminders.hour} onChange={e => saveReminders({ hour: Number(e.target.value) })}>{[8, 9, 12, 18, 20].map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <button className="btn-ghost" onClick={() => requestNotifications().then(p => { setPermission(p); show(p === 'granted' ? 'Notificações permitidas' : 'Permissão não concedida') })}>Permitir notificações</button>
+        <button className="btn-ghost" onClick={async () => { const ok = await showReminderNotification('NoAzul: contas chegando', 'Teste de lembrete — tudo funcionando!'); show(ok ? 'Notificação enviada' : 'Ative a permissão de notificações primeiro') }}>Testar</button>
+        <span className="muted">{permission === 'granted' ? 'Notificações permitidas' : permission === 'denied' ? 'Notificações bloqueadas no navegador' : permission === 'unsupported' ? 'Navegador sem suporte' : 'Permissão pendente'}</span>
+      </div>
+      {preview.length > 0 && <p className="muted text-xs">Agora: {reminderMessage(preview, 2)}</p>}
+    </section>
+    <section className="card p-6 space-y-4">
       <h2 className="font-bold">Seus dados</h2>
       <div className="flex gap-2 flex-wrap">
         <button className="btn-ghost" onClick={async () => { try { const b = await exportBackup(); const u = URL.createObjectURL(new Blob([b as any], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-backup.db'; a.click(); show('Cópia baixada') } catch (e:any) { show(e?.message || 'Não foi possível baixar a cópia.') } }}><Download size={15} /> Baixar cópia</button>
         <button className="btn-ghost" onClick={async () => { try { const [transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions] = await Promise.all([listTransactions(userId), listFixedBills(userId), listGoals(userId), listBudgets(userId), listBillPayments(userId), listRecurrences(userId), listRecurrenceLaunches(userId), listCategories(userId), listGoalAutoLaunches(userId), listInvestments(userId), listAllInvestmentTransactions(userId)]); const payload = { exportedAt: new Date().toISOString(), transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions }; const u = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-dados.json'; a.click(); URL.revokeObjectURL(u); show('JSON exportado') } catch (e:any) { show(e?.message || 'Não foi possível exportar o JSON.') } }}><Download size={15} /> Exportar JSON</button>
         <label className="btn-ghost cursor-pointer"><Upload size={15} /> Restaurar cópia<input type="file" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importBackup(new Uint8Array(await f.arrayBuffer())); await reload(); show('Dados restaurados') } catch (err:any) { show(err?.message || 'Não foi possível restaurar.') } }} /></label>
-        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar planilha CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const rows = parseCsvImport(await f.text()); if (!rows.length) return show('Nenhum lançamento válido encontrado na planilha'); for (const r of rows) await addTransaction({ ...r, userId }); await reload(); show(`${rows.length} lançamento(s) importado(s)`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
+        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar OFX/CSV<input type="file" accept=".csv,.ofx,.qfx,text/csv,application/x-ofx" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const text = await f.text(); const rows = /\.(ofx|qfx)$/i.test(f.name) || looksLikeOfx(text) ? parseOfx(text) : parseCsvImport(text); if (!rows.length) return show('Nenhum lançamento válido encontrado no arquivo'); const known = tx.slice(); let imported = 0; let skipped = 0; for (const r of rows) { const t = { ...r, userId }; if (known.some((k: any) => k.date === t.date && k.type === t.type && k.amount === t.amount && (k.description || '').trim().toLowerCase() === (t.description || '').trim().toLowerCase())) { skipped++; continue } await addTransaction(t); known.push(t); imported++ } await reload(); show(`${imported} lançamento(s) importado(s)${skipped ? ` • ${skipped} duplicado(s) ignorado(s)` : ''}`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
       </div>
-      <p className="muted text-xs">Planilha CSV no formato: Data;Descrição;Tipo;Categoria;Valor (o mesmo que o app exporta). A cópia completa guarda tudo em um arquivo só — ela também contém sua licença e dados financeiros, então guarde em local seguro.</p>
+      <p className="muted text-xs">CSV no formato Data;Descrição;Tipo;Categoria;Valor (o mesmo que o app exporta) ou extrato OFX/QFX do banco. Lançamentos idênticos são ignorados. A cópia completa guarda tudo em um arquivo só — ela também contém sua licença e dados financeiros, então guarde em local seguro.</p>
     </section>
     <section className="card p-6 space-y-3" style={{ borderColor: '#FECDD3' }}>
       <h2 className="font-bold text-rose-600">Zona de perigo</h2>

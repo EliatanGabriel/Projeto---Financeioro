@@ -1,8 +1,8 @@
 // NoAzul PWA service worker — cache-first para assets estáticos, network-first para HTML.
 // Dados financeiros (sql.js/localStorage) NÃO passam por aqui.
-// v4: precacheia o WASM com validação de content-type e faz cache-first em assets estáticos
+// v5: lembrete de contas com clique para focar o app; precacheia o WASM com validação de content-type e faz cache-first em assets estáticos
 // (permite abrir o app offline mesmo depois de recarregar a página).
-const CACHE = 'noazul-v4';
+const CACHE = 'noazul-v5';
 const CORE = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg', '/termos.html', '/privacidade.html'];
 const WASM = '/sql-wasm-browser.wasm';
 
@@ -59,4 +59,14 @@ self.addEventListener('fetch', (e) => {
     putSafe(request, res.clone());
     return res;
   }).catch(() => caches.match(request)));
+});
+
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of wins) { if ('focus' in c) { c.navigate('/'); return c.focus(); } }
+    return self.clients.openWindow('/');
+  })());
 });

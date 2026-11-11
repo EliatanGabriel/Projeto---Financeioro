@@ -27,3 +27,6 @@ export interface Budget { category: string; limit: number; userId?: string }
 export interface BillPayment { billId: string; month: string; paidAt: string; userId?: string }
 export interface Recurrence { id: string; userId?: string; description: string; amount: number; type: TxType; category: string; day: number; active: boolean; createdAt: string }
 export interface Category { name: string; type: TxType; userId?: string }
+export interface CreditCard { id: string; userId?: string; name: string; brand: string; limitAmount: number; closingDay: number; dueDay: number; color: string; createdAt: string; updatedAt?: string }
+export interface CreditCardPurchase { id: string; userId?: string; cardId: string; description: string; category: string; totalAmount: number; installments: number; firstDate: string; notes?: string; createdAt: string; updatedAt?: string }
+export interface CreditCardPayment { cardId: string; month: string; paidAt: string; userId?: string }

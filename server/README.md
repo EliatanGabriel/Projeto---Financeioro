@@ -18,7 +18,7 @@ pin de dispositivo, watermarks, dedup e rate limit — operações serializadas 
 O KV fica só como **fallback de migração** (leitura preguiçosa por chave, sem dual-write):
 no primeiro acesso de cada e-mail, o DO copia o registro do KV para o próprio storage e
 passa a ser a fonte oficial. Registros legados sem `deviceId`/watermarks são migrados como estão.
-`ADMIN_TOKEN` deve ser um valor aleatório forte (ex.: `openssl rand -hex 32`) usado só no endpoint `POST /admin/reset-device`. O endpoint tem rate limit por IP (5 falhas/15 min → bloqueio de 15 min) — respostas 401/429 são genéricas e o token nunca é logado.
+`ADMIN_TOKEN` deve ser um valor aleatório forte (ex.: `openssl rand -hex 32`) usado nos endpoints `POST /admin/*` (painel, reset, exportação, freeze). O gate tem rate limit por IP (5 falhas/15 min → bloqueio de 15 min) — respostas 401/429 são genéricas e o token nunca é logado.
 A URL final fica tipo `https://noazul-license.seu-subdominio.workers.dev`.
 
 ## Ligar na Cakto
@@ -34,6 +34,12 @@ A URL final fica tipo `https://noazul-license.seu-subdominio.workers.dev`.
 - Ajustes → **URL do servidor de licenças** → cole a URL do Worker (ou edite `LICENSE_API_URL` em `src/config/plans.ts`).
 - O cliente paga na Cakto, abre a tela Pro, digita o **e-mail da compra** e toca em
   **Verificar minha assinatura** — o Pro ativa sozinho. Renovação/cancelamento são automáticos.
+
+## Painel admin e portal do cliente (UI)
+- **Painel:** `GET https://SEU-WORKER/admin` — informe o `ADMIN_TOKEN` para listar licenças (status, validade, aparelho mascarado), buscar por e-mail, resetar aparelho e congelar/descongelar o serviço. O token fica só em `sessionStorage`; recomenda-se proteger `/admin` com **Cloudflare Access** além do token.
+- **Listagem:** `POST /admin/licenses {"token":"...","limit":25,"cursor":null,"email":"opcional@x.com"}` → `entries`, `cursor`, `complete`. Métricas são calculadas no navegador sobre as páginas carregadas.
+- **Portal:** `GET https://SEU-WORKER/portal` — cliente consulta a validade digitando o e-mail. `POST /portal/status {"email":"..."}` responde apenas `status`, `expiresAt`, `plan` e `deviceLinked` (nunca nome, aparelho ou pedidos). Limite de 30 consultas/min por e-mail.
+- Ambas as páginas são servidas com CSP restrita, `no-store` e `noindex`.
 
 ## Segurança e regras
 - `PRIVATE_KEY_PEM`, `CAKTO_WEBHOOK_SECRET` e `ADMIN_TOKEN` ficam só no Worker (secrets). Nunca no app, nunca no git (`.gitignore` protege `tools/private.key.pem`).

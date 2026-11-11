@@ -276,6 +276,28 @@ async _handle(request) {
     const complete = listed.list_complete !== false && !cursor
     return json({ ok: true, emails, cursor, complete, total: entries.length })
   }
+  if (url.pathname === '/internal/summary' && request.method === 'POST') {
+    const body = await request.json().catch(() => null)
+    const email = normalizeEmail(body?.email)
+    if (!email) return json({ ok: false, error: 'email_required' }, 400)
+    return json({ ok: true, email, sub: await this._getSub(email) })
+  }
+  if (url.pathname === '/internal/portal-status' && request.method === 'POST') {
+    const body = await request.json().catch(() => null)
+    const email = normalizeEmail(body?.email)
+    if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
+    const rlKey = `portrl:${email}:${new Date().toISOString().slice(0, 16)}`
+    const rl = Number(await this.storage.get(rlKey) || 0)
+    if (rl >= 30) return json({ ok: false, error: 'rate_limited', message: 'Muitas consultas. Tente novamente em instantes.' }, 429)
+    await this.storage.put(rlKey, rl + 1)
+    const sub = await this._getSub(email)
+    if (!sub) return json({ ok: true, found: false })
+    const expiresAt = sub.expiresAt || null
+    const expired = !expiresAt || new Date(expiresAt) <= new Date()
+    const paused = sub.revoked === true || sub.status === 'paused'
+    const status = paused ? 'paused' : expired ? 'expired' : (sub.status === 'active' || sub.status === 'canceled') ? 'active' : 'inactive'
+    return json({ ok: true, found: true, status, expiresAt, plan: 'pro-monthly', deviceLinked: Boolean(sub.deviceId) })
+  }
   if (url.pathname === '/internal/export' && request.method === 'POST') {
     const body = await request.json().catch(() => null)
     const email = normalizeEmail(body?.email)
@@ -620,11 +642,113 @@ async function registerEmail(env, email) {
   return r.json().catch(() => ({}))
 }
 
+function htmlPage(body, status = 200) {
+  return new Response(body, { status, headers: {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-frame-options': 'DENY',
+    'x-robots-tag': 'noindex, nofollow',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  } })
+}
+function licenseSummary(email, sub) {
+  if (!sub) return { email, status: 'none' }
+  const expiresAt = sub.expiresAt || null
+  const expired = !expiresAt || new Date(expiresAt) <= new Date()
+  const paused = sub.revoked === true || sub.status === 'paused'
+  const status = paused ? 'paused' : expired ? 'expired' : (sub.status === 'active' || sub.status === 'canceled') ? 'active' : 'inactive'
+  return { email, status, expiresAt, plan: sub.plan || 'pro-monthly', device: sub.deviceId ? '…' + String(sub.deviceId).slice(-6) : '', updatedAt: sub.updatedAt || sub.createdAt || '' }
+}
+async function listLicenses(env, email, cursor, limit) {
+  const reg = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('__registry__'))
+  let emails = []; let next = null; let complete = true
+  if (email) emails = [email]
+  else {
+    const r = await reg.fetch('https://license-store/internal/list-index', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cursor: cursor || undefined, limit }) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error('registry_failed')
+    emails = d.emails || []; next = d.cursor || null; complete = d.complete === true
+  }
+  const entries = []
+  for (const em of emails) {
+    try {
+      const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName(em))
+      const r = await stub.fetch('https://license-store/internal/summary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: em }) })
+      const d = await r.json().catch(() => ({}))
+      entries.push(licenseSummary(em, d.sub))
+    } catch { entries.push({ email: em, status: 'error' }) }
+  }
+  return { entries, cursor: next, complete }
+}
+
+const ADMIN_HTML = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NoAzul — Admin</title><style>
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1220;color:#e5edf7}header{display:flex;align-items:center;gap:.6rem;padding:1rem 1.2rem;background:#111a2c;border-bottom:1px solid #22314a}header b{color:#34d399}main{max-width:1100px;margin:0 auto;padding:1.2rem}.card{background:#111a2c;border:1px solid #22314a;border-radius:14px;padding:1.1rem;margin-bottom:1rem}h1,h2{margin:.2rem 0 .8rem;font-size:1.1rem}.muted{color:#94a3b8}.row{display:flex;gap:.5rem;flex-wrap:wrap}input{flex:1;min-width:200px;background:#0b1220;border:1px solid #2b3b58;color:#e5edf7;border-radius:10px;padding:.65rem .8rem;font:inherit}button{background:#059669;border:0;color:#fff;border-radius:10px;padding:.65rem .9rem;font:inherit;font-weight:700;cursor:pointer}button.ghost{background:#1e293b;border:1px solid #334155}button.mini{padding:.35rem .6rem;font-size:.78rem;background:#334155}button:disabled{opacity:.5;cursor:not-allowed}table{width:100%;border-collapse:collapse;background:#111a2c;border:1px solid #22314a;border-radius:14px;overflow:hidden}th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid #1c2a42;vertical-align:middle}th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8}td{font-size:.85rem}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.6rem;margin-bottom:1rem}.stat{background:#111a2c;border:1px solid #22314a;border-radius:12px;padding:.7rem .8rem}.stat .num{font-size:1.35rem;font-weight:800}.pill{display:inline-block;border-radius:999px;padding:.15rem .5rem;font-size:.72rem;font-weight:800}.ok{background:#064e3b;color:#6ee7b7}.warn{background:#78350f;color:#fcd34d}.bad{background:#7f1d1d;color:#fecaca}.msg{min-height:1.2rem;color:#fcd34d;margin:.4rem 0}.freeze{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+</style></head><body><header><b>NoAzul</b><span class="muted">painel administrativo</span></header><main>
+<section id="login" class="card"><h1>Entrar</h1><p class="muted">Informe o ADMIN_TOKEN configurado no Worker. Recomendado proteger esta rota com Cloudflare Access.</p><div class="row"><input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password"><button onclick="login()">Entrar</button></div></section>
+<section id="panel" hidden>
+<div class="card"><div class="row"><input id="q" placeholder="Buscar por e-mail"><button onclick="load()">Buscar</button><button class="ghost" id="more" onclick="fetchPage(true)">Carregar mais</button><button class="ghost" onclick="logout()">Sair</button></div><div class="msg" id="msg"></div><div class="stats" id="stats"></div><table><thead><tr><th>E-mail</th><th>Status</th><th>Expira</th><th>Aparelho</th><th>Atualizado</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="card"><h2>Congelamento (manutenção)</h2><p class="muted">Congela escritas durante exportação/restauração. Use Confirmar para concluir e Descongelar para voltar.</p><div class="freeze"><button onclick="freeze('freeze')">Congelar</button><button class="ghost" onclick="freeze('freeze/confirm')">Confirmar</button><button class="ghost" onclick="freeze('freeze/unlock')">Descongelar</button><button class="ghost" onclick="freeze('freeze/state')">Atualizar estado</button></div><p class="muted" id="freeze"></p></div>
+</section></main><script>
+var TOKEN_KEY='noazul.admin.token';var token='',cursor=null,rows=[],loadedAll=true;
+function $(id){return document.getElementById(id)}
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function toast(m){var el=$('msg');el.textContent=m||'';if(m)setTimeout(function(){el.textContent=''},5000)}
+function api(path,body){body=body||{};body.token=token;return fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return {}}).then(function(d){if(!r.ok)throw new Error((d&&d.error)||('HTTP '+r.status));return d})})}
+function login(){var t=$('token').value.trim();if(!t)return;token=t;sessionStorage.setItem(TOKEN_KEY,t);showPanel();load()}
+function logout(){token='';sessionStorage.removeItem(TOKEN_KEY);$('panel').hidden=true;$('login').hidden=false;$('token').value=''}
+function showPanel(){$('login').hidden=true;$('panel').hidden=false}
+function load(){cursor=null;rows=[];fetchPage(false)}
+function fetchPage(more){var body={limit:25};var q=$('q').value.trim();if(q)body.email=q;if(more&&cursor)body.cursor=cursor;api('/admin/licenses',body).then(function(d){if(!more)rows=[];rows=rows.concat(d.entries||[]);cursor=d.cursor;loadedAll=d.complete===true;render();$('more').disabled=loadedAll}).catch(function(e){toast(e.message)})}
+function label(s){return {active:'Ativa',expired:'Expirada',paused:'Pausada',none:'Sem assinatura',inactive:'Inativa',error:'Erro'}[s]||s}
+function fmt(s){if(!s)return '—';var d=new Date(s);return isNaN(d)?String(s):d.toLocaleString('pt-BR')}
+function card(l,v){return '<div class="stat"><div class="muted">'+esc(l)+'</div><div class="num">'+esc(v)+'</div></div>'}
+function render(){var now=Date.now();var active=0,expired=0,paused=0,none=0,expiring=0;rows.forEach(function(r){if(r.status==='active'){active++;if(r.expiresAt){var d=(new Date(r.expiresAt).getTime()-now)/86400000;if(d>=0&&d<=7)expiring++}}else if(r.status==='expired')expired++;else if(r.status==='paused')paused++;else if(r.status==='none')none++});$('stats').innerHTML=card('Ativas',active)+card('Expirando (7d)',expiring)+card('Expiradas',expired)+card('Pausadas',paused)+card('Sem assinatura',none)+card('Carregadas',rows.length);var out='';rows.forEach(function(r){var cls=r.status==='active'?'ok':r.status==='expired'?'warn':'bad';out+='<tr><td>'+esc(r.email)+'</td><td><span class="pill '+cls+'">'+esc(label(r.status))+'</span></td><td>'+esc(fmt(r.expiresAt))+'</td><td>'+esc(r.device||'—')+'</td><td>'+esc(fmt(r.updatedAt))+'</td><td><button class="mini" data-email="'+esc(r.email)+'">Resetar aparelho</button></td></tr>'});$('rows').innerHTML=out||'<tr><td colspan="6" class="muted">Nenhum resultado.</td></tr>';Array.prototype.forEach.call(document.querySelectorAll('button[data-email]'),function(b){b.onclick=function(){resetDevice(b.getAttribute('data-email'))}})}
+function resetDevice(email){if(!confirm('Resetar o vínculo de aparelho de '+email+'?'))return;api('/admin/reset-device',{email:email}).then(function(){toast('Aparelho resetado');fetchPage(false)}).catch(function(e){toast(e.message)})}
+function freeze(path){api('/admin/'+path,{}).then(function(d){$('freeze').textContent='Estado: '+(d.state||'ok');toast('Operação concluída')}).catch(function(e){toast(e.message)})}
+var saved=sessionStorage.getItem(TOKEN_KEY);if(saved){token=saved;showPanel();load()}
+</script></body></html>`
+
+const PORTAL_HTML = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NoAzul — Minha assinatura</title><style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;background:#f1f5f9;color:#0f172a;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem}.card{background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:1.5rem;max-width:430px;width:100%;box-shadow:0 16px 40px rgba(15,23,42,.08)}h1{margin:0 0 .3rem;font-size:1.35rem}.muted{color:#64748b}input{width:100%;margin:.8rem 0;border:1px solid #cbd5e1;border-radius:12px;padding:.75rem .9rem;font:inherit}button{width:100%;background:#059669;border:0;color:#fff;border-radius:12px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.6}.result{margin-top:1rem;padding:.9rem;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0}.ok{color:#047857;font-weight:800}.warn{color:#b45309;font-weight:800}.bad{color:#b91c1c;font-weight:800}
+</style></head><body><div class="card"><h1>Minha assinatura NoAzul Pro</h1><p class="muted">Consulte a validade da assinatura vinculada ao seu e-mail. Por segurança, não mostramos dados do aparelho.</p><form onsubmit="check(event)"><input id="email" type="email" required placeholder="seu@email.com" autocomplete="email"><button id="btn" type="submit">Consultar</button></form><div id="out"></div></div><script>
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function fmt(s){if(!s)return '—';var d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('pt-BR')}
+function check(e){e.preventDefault();var email=document.getElementById('email').value.trim();var out=document.getElementById('out');var btn=document.getElementById('btn');if(!email)return;btn.disabled=true;out.innerHTML='<div class="result muted">Consultando…</div>';fetch('/portal/status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:email})}).then(function(r){return r.json().catch(function(){return {}})}).then(function(d){if(!d.ok){out.innerHTML='<div class="result bad">'+esc(d.message||'Não foi possível consultar agora.')+'</div>';return}if(!d.found||d.status==='none'){out.innerHTML='<div class="result bad">Não encontramos assinatura para este e-mail.</div>';return}var cls=d.status==='active'?'ok':d.status==='paused'?'warn':'bad';var label=d.status==='active'?'Ativa':d.status==='paused'?'Pausada':'Expirada';out.innerHTML='<div class="result"><div class="'+cls+'">'+label+'</div><div class="muted">Plano: '+esc(d.plan||'Pro')+'</div><div class="muted">Validade: '+esc(fmt(d.expiresAt))+'</div>'+(d.status==='active'?'<div class="muted">Tudo certo! Se precisar trocar de aparelho, peça o reset no suporte.</div>':'<div class="muted">Para renovar, use o link de compra que você recebeu.</div>')+'</div>'}).catch(function(){out.innerHTML='<div class="result bad">Sem conexão. Tente novamente.</div>'}).then(function(){btn.disabled=false})}
+</script></body></html>`
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
     if (request.method === 'OPTIONS') return json({}, 204)
     if (url.pathname === '/health' || url.pathname === '/') return json({ ok: true, service: 'noazul-license' })
+
+    if (url.pathname === '/admin' && request.method === 'GET') return htmlPage(ADMIN_HTML)
+    if (url.pathname === '/portal' && request.method === 'GET') return htmlPage(PORTAL_HTML)
+    if (url.pathname === '/portal/status' && request.method === 'POST') {
+      if (!env.LICENSE_DO) return json({ ok: false, error: 'do_not_configured', message: 'Serviço indisponível.' }, 500)
+      let body = {}
+      try { body = JSON.parse(await request.text() || '{}') } catch { return json({ ok: false, error: 'invalid_json', message: 'Requisição inválida.' }, 400) }
+      const email = normalizeEmail(body.email)
+      if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
+      const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName(email))
+      const r = await stub.fetch('https://license-store/internal/portal-status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+      return json(await r.json().catch(() => ({ ok: false, error: 'failed', message: 'Tente novamente.' })), r.status)
+    }
+    if (url.pathname === '/admin/licenses' && request.method === 'POST') {
+      let body = {}
+      try { body = JSON.parse(await request.text() || '{}') } catch { return json({ ok: false, error: 'invalid_json' }, 400) }
+      const gate = await adminGate(request, env, body.token)
+      if (gate.status === 429) return json({ ok: false, error: 'rate_limited' }, 429, { 'retry-after': String(gate.retryAfter || 900) })
+      if (gate.status !== 200) return json(gate.body, gate.status)
+      const email = body.email ? normalizeEmail(body.email) : ''
+      if (body.email && !email) return json({ ok: false, error: 'invalid_email' }, 400)
+      const limit = Math.min(50, Math.max(1, Number(body.limit) || 25))
+      try {
+        const data = await listLicenses(env, email, body.cursor, limit)
+        return json({ ok: true, ...data })
+      } catch { return json({ ok: false, error: 'registry_failed' }, 500) }
+    }
 
     if (url.pathname === '/webhook/cakto' && request.method === 'POST') {
       const raw = await request.arrayBuffer()
