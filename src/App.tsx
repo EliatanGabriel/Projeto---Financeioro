@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink } from 'lucide-react'
+import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck } from 'lucide-react'
 import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup } from './database/db'
 import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
 import { brl, newId, num } from './utils/format'
@@ -14,7 +14,7 @@ import { legacyCounts, reassignLegacyUser } from './database/db'
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Legend } from 'recharts'
 import type { Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence, Category, Investment, InvestmentTransaction } from './types'
 
-type Tab = 'inicio' | 'movimentos' | 'contas' | 'metas' | 'resumo' | 'investimentos' | 'config' | 'pro'
+type Tab = 'inicio' | 'movimentos' | 'contas' | 'metas' | 'resumo' | 'investimentos' | 'pro' | 'perfil' | 'config'
 const ACCENTS: Record<string, { label: string; brand: string; dark: string }> = {
   esmeralda: { label: 'Verde (grátis)', brand: '#0E9F6E', dark: '#0F766E' },
   violeta: { label: 'Roxo (Pro)', brand: '#8B5CF6', dark: '#7C3AED' },
@@ -95,7 +95,7 @@ export default function App() {
     setBudgets(await listBudgets(uid)); setPayments(await listBillPayments(uid))
     setRecurrences(await listRecurrences(uid)); setLaunches(await listRecurrenceLaunches(uid))
     setCategories(await listCategories(uid))
-    setName(await getSetting('userName') || '')
+    setName(await getSetting('userName') || authUser?.user_metadata?.display_name || '')
     const t = await getSetting('theme'); if (t) setDark(t === 'dark')
     setAccent(await getSetting('accent') || 'esmeralda')
     setCheckoutUrl(await getSetting('caktoCheckoutUrl') || '')
@@ -174,7 +174,7 @@ export default function App() {
   const NAV: [Tab, string, any][] = [
     ['inicio', 'Início', Home], ['movimentos', 'Movimentos', ArrowLeftRight],
     ['contas', 'Contas fixas', Receipt], ['metas', 'Metas', PiggyBank],
-    ['resumo', 'Resumo', BarChart3], ['investimentos', 'Investimentos', TrendingUp], ['pro', 'NoAzul Pro', Crown], ['config', 'Ajustes', SettingsIcon],
+    ['resumo', 'Resumo', BarChart3], ['investimentos', 'Investimentos', TrendingUp], ['pro', 'NoAzul Pro', Crown], ['perfil', 'Meu perfil', UserRound], ['config', 'Ajustes', SettingsIcon],
   ]
 
   if (authConfigured && !auth.loading && isRecovery) return <ResetPasswordScreen auth={auth} />
@@ -287,12 +287,13 @@ export default function App() {
           {tab === 'resumo' && <Resumo userId={uid} s={s} history={history12} tx={tx} month={month} budgets={budgets} bstatus={bstatus} fc={fc} expenseCats={expenseCats} reload={reload} show={show} goals={goals} isPro={isPro} requirePro={requirePro} />}
           {tab === 'investimentos' && <Investimentos userId={uid} investments={investments} allTx={invTx} reload={reload} show={show} />}
           {tab === 'pro' && <ProView pro={pro} checkout={checkout} checkoutConfigured={isCheckoutConfigured(checkout)} licenseApi={licenseApi} licenseApiConfigured={isLicenseApiConfigured(licenseApi)} reload={reload} show={show} goTab={setTab} />}
-          {tab === 'config' && <Config userId={uid} name={name} setName={setName} dark={dark} setDark={setDark} categories={categories} reload={reload} show={show} tx={tx} isPro={isPro} accent={accent} setAccent={setAccent} requirePro={requirePro} checkoutUrl={checkoutUrl} setCheckoutUrl={setCheckoutUrl} licenseApiUrl={licenseApiUrl} setLicenseApiUrl={setLicenseApiUrl} goPro={() => setTab('pro')} pro={pro} enqueueDelete={enqueueDelete} auth={auth} syncState={syncState} runSync={runSync} />}
+          {tab === 'perfil' && <Perfil auth={auth} name={name} setName={setName} show={show} isPro={isPro} pro={pro} goPro={() => setTab('pro')} syncState={syncState} runSync={runSync} checkout={checkout} />}
+          {tab === 'config' && <Config userId={uid} dark={dark} setDark={setDark} categories={categories} reload={reload} show={show} tx={tx} isPro={isPro} accent={accent} setAccent={setAccent} requirePro={requirePro} checkoutUrl={checkoutUrl} setCheckoutUrl={setCheckoutUrl} licenseApiUrl={licenseApiUrl} setLicenseApiUrl={setLicenseApiUrl} goPro={() => setTab('pro')} goPerfil={() => setTab('perfil')} pro={pro} enqueueDelete={enqueueDelete} />}
         </main>
       </div>
 
       <nav className="bottomnav md:hidden">
-        {NAV.filter(([k]: any) => k !== 'config').map(([k, l, Icon]: any) => <button key={k} onClick={() => setTab(k)} data-active={tab === k}><Icon size={20} /><span>{k === 'pro' ? 'Pro' : l.split(' ')[0]}</span></button>)}
+        {NAV.filter(([k]: any) => k !== 'config').map(([k, l, Icon]: any) => <button key={k} onClick={() => setTab(k)} data-active={tab === k}><Icon size={20} /><span>{k === 'pro' ? 'Pro' : k === 'investimentos' ? 'Investir' : l.split(' ')[0]}</span></button>)}
       </nav>
       {showUpsell && (
         <div className="modal-backdrop" onClick={() => setShowUpsell(false)}>
@@ -857,22 +858,95 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
   </div>
 }
 
-function Config({ userId, name, setName, dark, setDark, categories, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, pro, auth, syncState, runSync, enqueueDelete }: any) {
+function initialsOf(s: string) {
+  const parts = s.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'NA'
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+}
+
+function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSync, checkout }: any) {
+  const user = auth.user
+  const [draft, setDraft] = useState(name || '')
+  useEffect(() => { setDraft(name || '') }, [name])
+  const [pwd, setPwd] = useState(''); const [pwd2, setPwd2] = useState(''); const [busy, setBusy] = useState(false)
+  const displayName = (draft || name || user?.user_metadata?.display_name || '').trim()
+  const email = user?.email || ''
+  const saveName = async () => {
+    const v = draft.trim()
+    try {
+      await setSetting('userName', v)
+      setName(v)
+      if (auth.configured && user) { try { await auth.updateProfile(v) } catch {} }
+      show('Perfil atualizado')
+    } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
+  }
+  const changePassword = async () => {
+    if (busy) return
+    if (pwd.length < 6) return show('A senha precisa ter pelo menos 6 caracteres')
+    if (pwd !== pwd2) return show('As senhas não conferem')
+    setBusy(true)
+    try { const r = await auth.updatePassword(pwd); if (r.error) show(r.error); else { setPwd(''); setPwd2(''); show('Senha atualizada') } } finally { setBusy(false) }
+  }
+  const syncText = syncState.status === 'syncing' ? 'Sincronizando...' : syncState.status === 'offline' ? 'Offline — tudo fica na fila e sobe ao reconectar' : syncState.status === 'conflict' ? `${syncState.conflicts?.length || 0} conflito(s) aguardando decisão` : syncState.lastSyncAt ? `Sincronizado em ${new Date(syncState.lastSyncAt).toLocaleString('pt-BR')}` : 'Ainda não sincronizou'
+  return <div className="space-y-5 max-w-xl">
+    <section className="card p-6">
+      <div className="flex items-center gap-4">
+        <div style={{ width: 68, height: 68, borderRadius: 999, background: 'linear-gradient(135deg,var(--brand),var(--brand-dark))', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 900, flexShrink: 0 }}>{initialsOf(displayName || email || 'NoAzul')}</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xl font-extrabold truncate">{displayName || 'Visitante'}</div>
+          <div className="muted text-sm truncate flex items-center gap-1"><Mail size={14} /> {auth.configured && user ? email : 'Modo local — dados só neste aparelho'}</div>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="badge" style={{ background: isPro ? '#D1FAE5' : '#FEF3C7', color: isPro ? '#065F46' : '#92400E' }}>{isPro ? 'PRO ATIVO' : 'GRÁTIS'}</span>
+            {user?.created_at && <span className="muted text-xs">Conta desde {new Date(user.created_at).toLocaleDateString('pt-BR')}</span>}
+          </div>
+        </div>
+      </div>
+    </section>
+    <section className="card p-6 space-y-4">
+      <h2 className="font-bold text-lg flex items-center gap-2"><UserRound size={18} className="text-emerald-600" /> Nome de exibição</h2>
+      <p className="muted text-sm">É assim que o NoAzul chama você na tela inicial e nos relatórios.</p>
+      <Field label="Como você quer ser chamado?" value={draft} onChange={(v: any) => setDraft(v)} placeholder="Ex.: Maria" />
+      <button className="btn" onClick={saveName}><Check size={16} /> Salvar nome</button>
+    </section>
+    <section className="card p-6 space-y-3">
+      <h2 className="font-bold text-lg flex items-center gap-2"><Crown size={18} className="text-amber-500" /> Seu plano</h2>
+      {isPro ? <>
+        <p className="text-sm">Você é <b>Pro</b>{pro.plan === 'lifetime' ? ' vitalício' : ''}, válido até <b>{pro.expiresAt ? new Date(pro.expiresAt).toLocaleDateString('pt-BR') : '—'}</b>.</p>
+        <div className="flex gap-2 flex-wrap"><button className="btn-ghost" onClick={goPro}>Ver detalhes do Pro</button>{checkout && <a className="btn-ghost" href={checkout} target="_blank" rel="noreferrer">Renovar</a>}</div>
+      </> : <>
+        <p className="text-sm muted">Versão grátis. Desbloqueie análise anual, metas automáticas, Excel e temas premium.</p>
+        <button className="btn" onClick={goPro}><Crown size={16} /> Conhecer o Pro</button>
+      </>}
+    </section>
+    <section className="card p-6 space-y-3">
+      <h2 className="font-bold text-lg flex items-center gap-2"><ShieldCheck size={18} className="text-emerald-600" /> Conta e sincronização</h2>
+      {auth.configured && user ? <>
+        <div className="text-sm break-all">E-mail: <b>{email}</b></div>
+        <div className="text-sm muted">{syncText}</div>
+        <div className="flex gap-2 flex-wrap"><button className="btn-ghost" onClick={runSync}>Sincronizar agora</button><button className="btn-ghost" onClick={async () => { await auth.signOut(); window.location.reload() }}><LogOut size={15} /> Sair da conta</button></div>
+        <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
+        <p className="muted text-xs">A exclusão apaga seus dados na nuvem. Os dados locais deste aparelho continuam até você apagá-los em Ajustes → Zona de perigo.</p>
+      </> : <p className="muted text-sm">Sem conta conectada: o NoAzul está em <b>modo local</b> e seus dados ficam só neste aparelho. Configure o Supabase para sincronizar entre dispositivos.</p>}
+    </section>
+    {auth.configured && user && <section className="card p-6 space-y-3">
+      <h2 className="font-bold text-lg flex items-center gap-2"><KeyRound size={18} className="text-emerald-600" /> Alterar senha</h2>
+      <Field label="Nova senha" value={pwd} onChange={(v: any) => setPwd(v)} placeholder="Mínimo 6 caracteres" type="password" />
+      <Field label="Repita a nova senha" value={pwd2} onChange={(v: any) => setPwd2(v)} placeholder="••••••••" type="password" />
+      <button className="btn" onClick={changePassword} disabled={busy}><KeyRound size={16} /> {busy ? 'Salvando...' : 'Atualizar senha'}</button>
+    </section>}
+  </div>
+}
+
+function Config({ userId, dark, setDark, categories, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, goPerfil, pro, enqueueDelete }: any) {
   const [catName, setCatName] = useState(''); const [catType, setCatType] = useState<'in' | 'out'>('out')
   return <div className="space-y-5 max-w-xl">
-    <section className="card p-6 space-y-4">
-      <h2 className="font-bold text-lg">Conta e sincronização</h2>
-      {auth.configured && auth.user ? <>
-        <div className="text-sm">E-mail: <b>{auth.user.email}</b></div>
-        <div className="text-sm muted">Sincronização: {syncState.status === 'syncing' ? 'sincronizando...' : syncState.status === 'offline' ? 'offline (operações ficam na fila)' : syncState.status === 'conflict' ? `${syncState.conflicts?.length || 0} conflito(s) aguardando decisão` : syncState.lastSyncAt ? `sincronizado em ${new Date(syncState.lastSyncAt).toLocaleString('pt-BR')}` : 'ainda não sincronizou'}</div>
-        <div className="flex gap-2 flex-wrap"><button className="btn-ghost" onClick={runSync}>Sincronizar agora</button><button className="btn-ghost" onClick={async () => { await auth.signOut(); window.location.reload() }}>Sair da conta</button></div>
-        <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
-        <p className="muted text-xs">A exclusão usa uma função segura no servidor (service_role nunca chega ao app) e apaga seus dados na nuvem. Os dados locais deste aparelho permanecem até você apagá-los em Zona de perigo.</p>
-      </> : <p className="muted text-sm">{auth.configured ? 'Entre para sincronizar entre dispositivos.' : 'Contas/sincronização ainda não configuradas — usando modo local.'}</p>}
+    <section className="card p-6 flex items-center gap-3">
+      <UserRound size={22} className="text-emerald-600" />
+      <div className="text-sm"><b>Perfil e conta</b><div className="muted text-xs">Nome, e-mail, senha, plano e sincronização.</div></div>
+      <button className="link ml-auto shrink-0" onClick={goPerfil}>Abrir perfil</button>
     </section>
     <section className="card p-6 space-y-5">
       <h2 className="font-bold text-lg">Ajustes</h2>
-      <Field label="Como você quer ser chamado?" value={name} onChange={(v: any) => { setName(v); setSetting('userName', v) }} placeholder="Ex.: Maria" />
       <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={dark} onChange={e => { setDark(e.target.checked); setSetting('theme', e.target.checked ? 'dark' : 'light') }} /> Modo escuro</label>
       <div>
         <div className="label">Cor do app {isPro ? '' : '(temas coloridos são Pro)'}</div>

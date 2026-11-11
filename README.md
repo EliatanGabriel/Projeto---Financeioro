@@ -30,7 +30,8 @@ Pré-requisitos do desktop (Rust + dependências do sistema) em `docs/INSTALACAO
 - **Resumo:** previsão de fim de mês ("se continuar assim"), últimos 12 meses, onde mais gastou, **PDF do mês, CSV do mês e completo**
 - **Resumo anual:** opção "Ano todo" no Resumo — totais do ano, mês a mês, média, melhor/pior mês e onde mais gastou (grátis básico)
 - **NoAzul Pro (R$ 10/mês via Cakto):** análise anual avançada com nota 0–100, comparativo com o ano anterior, PDF/Excel anual, metas que guardam sozinhas todo mês, metas/recorrências ilimitadas e temas premium. Assinatura e ativação por chave na tela **Pro** — guia completo em `docs/CAKTO-PRO.md`
-- **Ajustes:** nome, modo escuro, **categorias próprias**, importar planilha CSV, cópia/restauração completa, apagar tudo, link da Cakto
+- **Ajustes:** modo escuro, **categorias próprias**, importar planilha CSV, cópia/restauração completa, apagar tudo, link da Cakto
+- **Perfil:** avatar com iniciais, nome de exibição, e-mail, plano, status de sincronização, alterar senha, sair e excluir conta (ou modo local sem conta)
 
 Motor de cálculo em `src/calculations/personal.ts` e `src/calculations/annual.ts` (testados em `src/tests/`).
 Banco SQLite local via sql.js em `src/database/db.ts`.

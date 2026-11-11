@@ -42,7 +42,7 @@ Todas as tabelas privadas com **Row Level Security** e 4 políticas cada (SELECT
 Independente: `server/worker.js`, `src/licensing/`, `src/config/plans.ts` e o `deviceId` de ativação **não mudam**. A identidade da conta (UUID do Supabase) e a identidade da licença são coisas separadas.
 
 ## Autenticação e sincronização (Fases 3–5)
-- Telas: Login, Cadastro, Esqueci a senha, Redefinição, Verificação de e-mail e Perfil (em Ajustes). Sem variáveis configuradas, o app usa o modo local como antes.
+- Telas: Login, Cadastro, Esqueci a senha, Redefinição, Verificação de e-mail e Perfil (aba própria no app). Sem variáveis configuradas, o app usa o modo local como antes.
 - Sincronização: motor em `src/sync/` (diff por hash, fila de tombstones com retry/backoff, conflitos nunca sobrescritos silenciosamente, indicador no topo). Offline: tudo funciona no SQLite local; a fila/meta persistem e sincronizam ao reconectar.
 - Migração de dados antigos: no primeiro login com dados legados no aparelho, o app oferece importação (reatribuição do `user_id` legado → UUID da conta, validação de identidade ambígua, push e confirmação antes de concluir). Nada é apagado antes da confirmação.
 - Exclusão de conta: Edge Function `supabase/functions/delete-account` (service_role só no servidor); o app chama via `functions.invoke` e sai após sucesso.

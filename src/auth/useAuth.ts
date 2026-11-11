@@ -9,6 +9,7 @@ export interface AuthState {
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
   updatePassword: (password: string) => Promise<{ error: string | null }>
+  updateProfile: (name: string) => Promise<{ error: string | null }>
   deleteAccount: () => Promise<{ error: string | null }>
 }
 
@@ -48,6 +49,17 @@ export function useAuth(): AuthState {
       if (!supabase) return { error: 'Supabase não configurado.' }
       const { error } = await supabase.auth.updateUser({ password })
       return { error: error ? err(error) : null }
+    },
+    async updateProfile(name) {
+      if (!supabase) return { error: 'Supabase não configurado.' }
+      const { error } = await supabase.auth.updateUser({ data: { display_name: name } })
+      if (error) return { error: err(error) }
+      const id = session?.user?.id
+      if (id) {
+        const { error: profileError } = await supabase.from('profiles').update({ display_name: name }).eq('id', id)
+        if (profileError) return { error: err(profileError) }
+      }
+      return { error: null }
     },
     async deleteAccount() {
       if (!supabase) return { error: 'Supabase não configurado.' }
