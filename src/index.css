@@ -38,6 +38,7 @@ body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-ser
 .segment button[data-active="true"]{background:var(--card);color:var(--text);box-shadow:0 3px 10px rgba(0,0,0,.08)}
 .chips{display:flex;flex-wrap:wrap;gap:.45rem}
 .chip{border:1.5px solid var(--border);background:var(--card);border-radius:999px;padding:.4rem .8rem;font-size:.83rem;font-weight:600;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.2rem .55rem;font-size:.7rem;font-weight:800;line-height:1;white-space:nowrap}
 .chip[data-active="true"]{background:var(--brand);border-color:var(--brand);color:#fff}
 .search{display:flex;align-items:center;gap:.5rem;flex:1;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:.6rem .8rem;color:var(--muted)}
 .search input{flex:1;background:transparent;outline:none;color:var(--text);font-size:.92rem}
