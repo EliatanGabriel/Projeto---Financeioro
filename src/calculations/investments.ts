@@ -33,7 +33,7 @@ export function validateInvestment(inv: Partial<Investment>): string[] {
   const errs: string[] = []
   if (!inv.name?.trim()) errs.push('Dê um nome ao investimento')
   if (!INVESTMENT_CATEGORIES.includes(inv.category as any)) errs.push('Escolha uma categoria válida')
-  if (inv.ticker && !/^[A-Z0-9.\-]{1,12}$/i.test(inv.ticker.trim())) errs.push('Ticker inválido (ex.: PETR4, BOVA11, BTC)')
+  if (inv.ticker && !/^[A-Z0-9.-]{1,12}$/i.test(inv.ticker.trim())) errs.push('Ticker inválido (ex.: PETR4, BOVA11, BTC)')
   if (!isNum(inv.quantity) || (inv.quantity as number) < 0) errs.push('Quantidade inválida')
   if (!isNum(inv.averagePrice) || (inv.averagePrice as number) < 0) errs.push('Preço médio inválido')
   if (!isNum(inv.investedAmount) || (inv.investedAmount as number) < 0) errs.push('Total investido inválido')

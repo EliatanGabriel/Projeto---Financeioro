@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck } from 'lucide-react'
-import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup } from './database/db'
+import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup, resolveSyncConflict } from './database/db'
 import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
 import { brl, newId, num } from './utils/format'
 import { exportCSV, exportPDFReport, exportXLSX } from './utils/reports'
@@ -9,7 +9,7 @@ import { annualSummary, compareAnnual, financialScore, spendingTrend, proInsight
 import { PRO_PRICE_BRL, PRO_FEATURES, FREE_FEATURES, FREE_LIMITS, getCheckoutUrl, isCheckoutConfigured, getLicenseApiUrl, isLicenseApiConfigured } from './config/plans'
 import { verifyLicense, getDeviceId, isProActive, proDaysLeft, fetchAutoLicense } from './licensing/licensing'
 import { useAuth } from './auth/useAuth'
-import { SYNC_ENTITIES } from './sync/engine'
+import { SYNC_ENTITIES, canonicalHash, resolveConflict } from './sync/engine'
 import { legacyCounts, reassignLegacyUser } from './database/db'
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Legend } from 'recharts'
 import type { Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence, Category, Investment, InvestmentTransaction } from './types'
@@ -206,7 +206,7 @@ export default function App() {
                 <span className="capitalize">{monthLabel(month)}</span>
                 <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
               </div>
-              {authConfigured && <button className="btn-ghost !py-2" onClick={runSync}>{syncState.status === 'syncing' ? 'Sincronizando...' : syncState.status === 'conflict' ? `${syncState.conflicts?.length || 0} conflito(s)` : syncState.status === 'offline' ? 'Offline' : syncState.lastSyncAt ? 'Sincronizado' : 'Sincronizar'}</button>}
+              {authConfigured && <button className="btn-ghost !py-2" onClick={syncState.status === 'conflict' ? () => setTab('perfil') : runSync}>{syncState.status === 'syncing' ? 'Sincronizando...' : syncState.status === 'conflict' ? `${syncState.conflicts?.length || 0} conflito(s)` : syncState.status === 'offline' ? 'Offline' : syncState.lastSyncAt ? 'Sincronizado' : 'Sincronizar'}</button>}
               <button className="btn-ghost !py-2" onClick={() => setTab('pro')}><Crown size={16} /> {isPro ? 'Pro ativo' : 'Pro'}</button>
               <button className="iconbtn" onClick={() => { setDark(!dark); setSetting('theme', !dark ? 'dark' : 'light') }} aria-label="Alternar tema">{dark ? <Sun size={18} /> : <Moon size={18} />}</button>
             </div>
@@ -298,7 +298,7 @@ export default function App() {
       {showUpsell && (
         <div className="modal-backdrop" onClick={() => setShowUpsell(false)}>
           <div className="modal card" onClick={e => e.stopPropagation()}>
-            <button className="iconbtn absolute top-3 right-3" onClick={() => setShowUpsell(false)}><X size={16} /></button>
+            <button className="iconbtn absolute top-3 right-3" aria-label="Fechar" onClick={() => setShowUpsell(false)}><X size={16} /></button>
             <div className="pro-hero !p-5 text-center">
               <Crown size={28} className="mx-auto" />
               <div className="font-extrabold text-xl mt-2">Recurso do Pro</div>
@@ -400,7 +400,7 @@ function Recorrencias({ userId, recurrences, launches, month, reload, show, expe
     <button className="btn mt-4" onClick={save}><Plus size={17} /> Criar recorrência</button>
     {recurrences.length > 0 && <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--border)' }}>{recurrences.map((r: any) => {
       const launched = isRecurrenceLaunched(launches, r, month)
-      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
+      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" aria-label="Apagar recorrência" onClick={async () => { if (!confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
     })}</div>}
   </section>
 }
@@ -433,8 +433,8 @@ function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: any
           <div className={`tx-icon ${b.paid ? 'in' : 'out'}`}>{b.paid ? <Check size={16} /> : <Receipt size={16} />}</div>
           <div className="flex-1"><div className={`font-bold ${b.paid ? 'line-through' : ''}`}>{b.name}</div><div className="muted text-xs">Vence dia {b.dueDay}{b.overdue ? ' • venceu!' : b.dueSoon ? ` • vence em ${b.daysToDue} dia(s)` : ''}</div></div>
           <b>{brl(b.amount)}</b>
-          <button className="iconbtn" onClick={() => edit(b)}><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Editar conta fixa" onClick={() => edit(b)}><Pencil size={15} /></button>
+          <button className="iconbtn" aria-label="Apagar conta fixa" onClick={async () => { if (!confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
@@ -476,8 +476,8 @@ function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }
           <div className="flex gap-2 mt-2">
             <input className="input" placeholder="Adicionar R$" value={add[g.id] || ''} onChange={e => setAdd({ ...add, [g.id]: e.target.value })} inputMode="decimal" />
             <button className="btn" onClick={async () => { const v = num(add[g.id] || ''); if (!v) return show('Informe um valor'); try { await upsertGoal({ ...g, userId, saved: g.saved + v }); await reload(); setAdd({ ...add, [g.id]: '' }); show('Valor adicionado. Continue assim!') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') } }}>Guardar</button>
-            <button className="iconbtn" onClick={() => edit(g)}><Pencil size={15} /></button>
-            <button className="iconbtn" onClick={async () => { if (!confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+            <button className="iconbtn" aria-label="Editar meta" onClick={() => edit(g)}><Pencil size={15} /></button>
+            <button className="iconbtn" aria-label="Apagar meta" onClick={async () => { if (!confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
           </div>
         </div>
       ))}
@@ -499,14 +499,14 @@ function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCa
   const [view, setView] = useState<'mes' | 'ano'>('mes')
   const bmap = Object.fromEntries(budgets.map((b: any) => [b.category, b]))
   if (view === 'ano') return <div className="space-y-5"><div className="segment"><button data-active={false} onClick={() => setView('mes')}>Do mês</button><button data-active="true" onClick={() => setView('ano')}>Ano todo</button></div><AnnualView tx={tx} isPro={isPro} requirePro={requirePro} show={show} /></div>
-  const pdf = () => exportPDFReport(`NoAzul — ${monthLabel(month)}`, [
+  const pdf = async () => exportPDFReport(`NoAzul — ${monthLabel(month)}`, [
     `Entrou: ${brl(s.income)}`, `Saiu: ${brl(s.expense)}`, `Sobrou: ${brl(s.balance)}`, `Contas fixas: ${brl(s.billsTotal)}`, `Previsão fim do mês: ${brl(fc.projectedBalance)}`, '',
     ...s.byCategory.map((c: any) => `${c.name}: ${brl(c.value)}`), '',
     ...bstatus.map((b: any) => `Limite ${b.category}: ${brl(b.spent)} de ${brl(b.limit)} (${b.pct}%)`), '',
     ...goals.map((g: any) => `Meta ${g.name}: ${brl(g.saved)} de ${brl(g.target)}`),
     ...tx.filter((t: any) => monthKey(t.date) === month).map((t: any) => `${t.date} ${t.description} ${t.type === 'in' ? '+' : '-'}${brl(t.amount)}`),
   ], `noazul-${month}.pdf`)
-  const xlsx = () => { if (!requirePro()) return; exportXLSX(tx.filter((t: any) => monthKey(t.date) === month).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-${month}.xlsx`); show('Excel baixado') }
+  const xlsx = async () => { if (!requirePro()) return; await exportXLSX(tx.filter((t: any) => monthKey(t.date) === month).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-${month}.xlsx`); show('Excel baixado') }
   return <div className="space-y-5">
     <div className="segment"><button data-active="true" onClick={() => setView('mes')}>Do mês</button><button data-active={false} onClick={() => setView('ano')}>Ano todo</button></div>
     <div className="grid sm:grid-cols-3 gap-4">
@@ -551,8 +551,8 @@ function AnnualView({ tx, isPro, requirePro, show }: any) {
   const trend = useMemo(() => spendingTrend(tx), [tx])
   const insights = useMemo(() => proInsights(tx, year), [tx, year])
   const fmt = (v: number) => (v > 0 ? '+' : '') + brl(v)
-  const pdfAnnual = () => { if (!requirePro()) return; exportPDFReport(`NoAzul — Resumo anual ${year}`, [`Entrou: ${brl(a.income)}`, `Saiu: ${brl(a.expense)}`, `Sobrou: ${brl(a.balance)}`, `Média mensal de gastos: ${brl(a.avgExpense)}`, `Nota: ${score.score}/100 — ${score.label}`, '', ...a.months.map((m: any) => `${m.label}: entrou ${brl(m.income)} • saiu ${brl(m.expense)} • sobrou ${brl(m.balance)}`), '', ...a.byCategory.map((c: any) => `${c.name}: ${brl(c.value)}`), '', ...insights], `noazul-anual-${year}.pdf`); show('PDF anual baixado') }
-  const xlsxAnnual = () => { if (!requirePro()) return; exportXLSX(tx.filter((t: any) => Number(t.date.slice(0, 4)) === year).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-anual-${year}.xlsx`); show('Excel anual baixado') }
+  const pdfAnnual = async () => { if (!requirePro()) return; await exportPDFReport(`NoAzul — Resumo anual ${year}`, [`Entrou: ${brl(a.income)}`, `Saiu: ${brl(a.expense)}`, `Sobrou: ${brl(a.balance)}`, `Média mensal de gastos: ${brl(a.avgExpense)}`, `Nota: ${score.score}/100 — ${score.label}`, '', ...a.months.map((m: any) => `${m.label}: entrou ${brl(m.income)} • saiu ${brl(m.expense)} • sobrou ${brl(m.balance)}`), '', ...a.byCategory.map((c: any) => `${c.name}: ${brl(c.value)}`), '', ...insights], `noazul-anual-${year}.pdf`); show('PDF anual baixado') }
+  const xlsxAnnual = async () => { if (!requirePro()) return; await exportXLSX(tx.filter((t: any) => Number(t.date.slice(0, 4)) === year).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-anual-${year}.xlsx`); show('Excel anual baixado') }
   return <div className="space-y-5">
     <div className="flex items-center justify-between">
       <h2 className="font-extrabold text-lg flex items-center gap-2"><CalendarDays size={20} /> Resumo de {year}</h2>
@@ -749,8 +749,8 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
           <div className="flex-1 min-w-0"><div className="font-bold truncate">{inv.name}{inv.ticker ? ` (${inv.ticker})` : ''}</div><div className="muted text-xs">{inv.category}{inv.institution ? ` • ${inv.institution}` : ''} • investido {brl(inv.investedAmount)}</div></div>
           <div className="text-right"><b>{brl(inv.currentValue)}</b><div className={`text-xs font-bold ${g.gain >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{g.gain >= 0 ? '+' : ''}{brl(g.gain)} ({g.pct}%)</div></div>
           <button className="btn-ghost" onClick={() => setSelectedId(inv.id)}>Detalhes</button>
-          <button className="iconbtn" onClick={() => edit(inv)}><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (!confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Editar investimento" onClick={() => edit(inv)}><Pencil size={15} /></button>
+          <button className="iconbtn" aria-label="Excluir investimento" onClick={async () => { if (!confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>) })}
     </section>
     {selected && <section className="card p-5 md:p-6 space-y-4">
@@ -775,7 +775,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
       </div>
       <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
         <h3 className="font-bold mb-3">Histórico</h3>
-        {!txs.length ? <p className="muted text-sm">Sem movimentações ainda.</p> : txs.map((t: any) => <div key={t.id} className="txrow"><div className="tx-icon in"><ArrowLeftRight size={16} /></div><div className="flex-1 min-w-0"><div className="font-bold">{(TX_LABELS as any)[t.type]} {t.description ? `— ${t.description}` : ''}</div><div className="muted text-xs">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}{t.quantity ? ` • ${t.quantity} un` : ''}{t.realizedGain ? ` • realizado ${brl(t.realizedGain)}` : ''}</div></div><b>{brl(t.amount)}</b><button className="iconbtn" onClick={() => editTx(t)}><Pencil size={15} /></button><button className="iconbtn" onClick={() => removeTx(t)}><Trash2 size={15} /></button></div>)}
+        {!txs.length ? <p className="muted text-sm">Sem movimentações ainda.</p> : txs.map((t: any) => <div key={t.id} className="txrow"><div className="tx-icon in"><ArrowLeftRight size={16} /></div><div className="flex-1 min-w-0"><div className="font-bold">{(TX_LABELS as any)[t.type]} {t.description ? `— ${t.description}` : ''}</div><div className="muted text-xs">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}{t.quantity ? ` • ${t.quantity} un` : ''}{t.realizedGain ? ` • realizado ${brl(t.realizedGain)}` : ''}</div></div><b>{brl(t.amount)}</b><button className="iconbtn" aria-label="Editar movimentação" onClick={() => editTx(t)}><Pencil size={15} /></button><button className="iconbtn" aria-label="Excluir movimentação" onClick={() => removeTx(t)}><Trash2 size={15} /></button></div>)}
       </div>
     </section>}
   </div>
@@ -864,6 +864,17 @@ function initialsOf(s: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
+const ENTITY_LABELS: Record<string, string> = {
+  transactions: 'Lançamento', fixed_bills: 'Conta fixa', goals: 'Meta', budgets: 'Limite',
+  bill_payments: 'Conta paga', recurrences: 'Recorrência', recurrence_launches: 'Recorrência lançada',
+  categories: 'Categoria', goal_auto_launches: 'Aporte de meta', investments: 'Investimento',
+  investment_transactions: 'Movimentação de investimento',
+}
+function describeRow(r: any) {
+  if (!r) return '—'
+  return r.description || r.name || r.category || r.month || r.id || '—'
+}
+
 function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSync, checkout }: any) {
   const user = auth.user
   const [draft, setDraft] = useState(name || '')
@@ -887,6 +898,28 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
     setBusy(true)
     try { const r = await auth.updatePassword(pwd); if (r.error) show(r.error); else { setPwd(''); setPwd2(''); show('Senha atualizada') } } finally { setBusy(false) }
   }
+  const resolve = async (c: any, choice: 'local' | 'remote') => {
+    if (!user) return
+    try {
+      const { makeSyncStore } = await import('./sync/store')
+      const store = makeSyncStore(user.id)
+      const row = resolveConflict(c, choice) as any
+      if (choice === 'local') {
+        await store.resolveConflictLocal(c.entity, c.recordId, { ...row, userId: user.id })
+        const meta = await store.getMeta(c.entity)
+        meta.set(c.recordId, { hash: canonicalHash(c.remote), version: c.remoteVersion || 0 })
+        await store.setMeta(c.entity, meta)
+      } else {
+        await store.replaceLocal(c.entity, [{ ...row, userId: user.id }])
+        const meta = await store.getMeta(c.entity)
+        meta.set(c.recordId, { hash: canonicalHash(row), version: row.version || c.remoteVersion || 1 })
+        await store.setMeta(c.entity, meta)
+      }
+      await resolveSyncConflict(c.id)
+      show('Conflito resolvido')
+      await runSync()
+    } catch (e: any) { show(e?.message || 'Não foi possível resolver o conflito.') }
+  }
   const syncText = syncState.status === 'syncing' ? 'Sincronizando...' : syncState.status === 'offline' ? 'Offline — tudo fica na fila e sobe ao reconectar' : syncState.status === 'conflict' ? `${syncState.conflicts?.length || 0} conflito(s) aguardando decisão` : syncState.lastSyncAt ? `Sincronizado em ${new Date(syncState.lastSyncAt).toLocaleString('pt-BR')}` : 'Ainda não sincronizou'
   return <div className="space-y-5 max-w-xl">
     <section className="card p-6">
@@ -902,6 +935,16 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
         </div>
       </div>
     </section>
+    {syncState.conflicts?.length > 0 && <section className="card p-6 space-y-3" style={{ borderColor: '#FDE68A' }}>
+      <h2 className="font-bold text-lg flex items-center gap-2"><AlertTriangle size={18} className="text-amber-500" /> Conflitos de sincronização</h2>
+      <p className="muted text-sm">O mesmo registro mudou neste aparelho e na nuvem. Escolha qual versão manter.</p>
+      {syncState.conflicts.map((c: any) => <div key={c.id} className="pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+        <div className="text-sm font-bold">{ENTITY_LABELS[c.entity] || c.entity}</div>
+        <div className="muted text-xs truncate">Meu: {describeRow(c.local)}</div>
+        <div className="muted text-xs truncate">Nuvem: {describeRow(c.remote)}</div>
+        <div className="flex gap-2 mt-2"><button className="btn-ghost !py-1.5" onClick={() => resolve(c, 'local')}>Manter meu</button><button className="btn-ghost !py-1.5" onClick={() => resolve(c, 'remote')}>Usar nuvem</button></div>
+      </div>)}
+    </section>}
     <section className="card p-6 space-y-4">
       <h2 className="font-bold text-lg flex items-center gap-2"><UserRound size={18} className="text-emerald-600" /> Nome de exibição</h2>
       <p className="muted text-sm">É assim que o NoAzul chama você na tela inicial e nos relatórios.</p>
@@ -972,6 +1015,7 @@ function Config({ userId, dark, setDark, categories, reload, show, isPro, accent
       <h2 className="font-bold">Seus dados</h2>
       <div className="flex gap-2 flex-wrap">
         <button className="btn-ghost" onClick={async () => { try { const b = await exportBackup(); const u = URL.createObjectURL(new Blob([b as any], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-backup.db'; a.click(); show('Cópia baixada') } catch (e:any) { show(e?.message || 'Não foi possível baixar a cópia.') } }}><Download size={15} /> Baixar cópia</button>
+        <button className="btn-ghost" onClick={async () => { try { const [transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions] = await Promise.all([listTransactions(userId), listFixedBills(userId), listGoals(userId), listBudgets(userId), listBillPayments(userId), listRecurrences(userId), listRecurrenceLaunches(userId), listCategories(userId), listGoalAutoLaunches(userId), listInvestments(userId), listAllInvestmentTransactions(userId)]); const payload = { exportedAt: new Date().toISOString(), transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions }; const u = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-dados.json'; a.click(); URL.revokeObjectURL(u); show('JSON exportado') } catch (e:any) { show(e?.message || 'Não foi possível exportar o JSON.') } }}><Download size={15} /> Exportar JSON</button>
         <label className="btn-ghost cursor-pointer"><Upload size={15} /> Restaurar cópia<input type="file" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importBackup(new Uint8Array(await f.arrayBuffer())); await reload(); show('Dados restaurados') } catch (err:any) { show(err?.message || 'Não foi possível restaurar.') } }} /></label>
         <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar planilha CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const rows = parseCsvImport(await f.text()); if (!rows.length) return show('Nenhum lançamento válido encontrado na planilha'); for (const r of rows) await addTransaction({ ...r, userId }); await reload(); show(`${rows.length} lançamento(s) importado(s)`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
       </div>

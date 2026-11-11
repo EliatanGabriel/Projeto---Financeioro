@@ -6,7 +6,7 @@ import type {Product,Marketplace,Transaction,FixedBill,Goal,Budget,BillPayment,R
 let sql:any=null; let DB:Database|null=null; const KEY='precifica.db.base64'
 async function init(){
  if(DB) return DB
- sql=await initSqlJs({locateFile:(f:string)=> f.endsWith('.wasm') ? '/sql-wasm-browser.wasm' : `/${f}`})
+ sql=await initSqlJs({locateFile:()=>'/sql-wasm-browser.wasm'})
  const saved=localStorage.getItem(KEY)
  if(saved){ const bin=Uint8Array.from(atob(saved),c=>c.charCodeAt(0)); DB=new sql.Database(bin) }
  else DB=new sql.Database()
@@ -25,11 +25,11 @@ function migrate(){
  CREATE TABLE IF NOT EXISTS fixed_bills(id TEXT PRIMARY KEY,name TEXT NOT NULL,amount REAL,due_day INTEGER,category TEXT,created_at TEXT);
  CREATE TABLE IF NOT EXISTS goals(id TEXT PRIMARY KEY,name TEXT NOT NULL,target REAL,saved REAL,deadline TEXT,created_at TEXT);
  CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date); CREATE INDEX IF NOT EXISTS idx_tx_type ON transactions(type);
- CREATE TABLE IF NOT EXISTS budgets(category TEXT PRIMARY KEY,"limit" REAL);
+ CREATE TABLE IF NOT EXISTS budgets(category TEXT NOT NULL,"limit" REAL,user_id TEXT,PRIMARY KEY(user_id,category));
  CREATE TABLE IF NOT EXISTS bill_payments(bill_id TEXT,month TEXT,paid_at TEXT,PRIMARY KEY(bill_id,month));
  CREATE TABLE IF NOT EXISTS recurrences(id TEXT PRIMARY KEY,description TEXT,amount REAL,type TEXT,category TEXT,day INTEGER,active INTEGER,created_at TEXT);
  CREATE TABLE IF NOT EXISTS recurrence_launches(recurrence_id TEXT,month TEXT,PRIMARY KEY(recurrence_id,month));
- CREATE TABLE IF NOT EXISTS categories(name TEXT,type TEXT,PRIMARY KEY(name,type));
+ CREATE TABLE IF NOT EXISTS categories(name TEXT,type TEXT,user_id TEXT,PRIMARY KEY(user_id,name,type));
  CREATE TABLE IF NOT EXISTS goal_auto_launches(goal_id TEXT,month TEXT,PRIMARY KEY(goal_id,month));
  CREATE TABLE IF NOT EXISTS investments(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,name TEXT NOT NULL,category TEXT,ticker TEXT,institution TEXT,quantity REAL,average_price REAL,invested_amount REAL,current_value REAL,started_at TEXT,notes TEXT,created_at TEXT,updated_at TEXT);
  CREATE TABLE IF NOT EXISTS investment_transactions(id TEXT PRIMARY KEY,investment_id TEXT NOT NULL,user_id TEXT NOT NULL,type TEXT,quantity REAL,unit_price REAL,amount REAL,date TEXT,description TEXT,created_at TEXT);
@@ -41,6 +41,18 @@ function migrate(){
  for (const tbl of ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches']) {
    const cols=db.exec(`PRAGMA table_info(${tbl})`)[0]?.values.map((v:any)=>String(v[1]))||[]
    if(cols.length && !cols.includes('user_id')) db.run(`ALTER TABLE ${tbl} ADD COLUMN user_id TEXT`)
+ }
+ // Migração: PK antiga (só categoria/nome) não isola contas no mesmo aparelho. Reconstrói com user_id na PK.
+ const tableSql=(t:string)=>String(db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",[t])[0]?.values[0]?.[0]||'').replace(/\s+/g,'').toUpperCase()
+ if(tableSql('budgets') && !tableSql('budgets').includes('PRIMARYKEY(USER_ID,CATEGORY)')){
+   db.run('CREATE TABLE budgets_new(category TEXT NOT NULL,"limit" REAL,user_id TEXT,PRIMARY KEY(user_id,category))')
+   db.run("INSERT OR REPLACE INTO budgets_new(category,\"limit\",user_id) SELECT category,\"limit\",COALESCE(user_id,'') FROM budgets")
+   db.run('DROP TABLE budgets'); db.run('ALTER TABLE budgets_new RENAME TO budgets')
+ }
+ if(tableSql('categories') && !tableSql('categories').includes('PRIMARYKEY(USER_ID,NAME,TYPE)')){
+   db.run('CREATE TABLE categories_new(name TEXT,type TEXT,user_id TEXT,PRIMARY KEY(user_id,name,type))')
+   db.run("INSERT OR REPLACE INTO categories_new(name,type,user_id) SELECT name,type,COALESCE(user_id,'') FROM categories")
+   db.run('DROP TABLE categories'); db.run('ALTER TABLE categories_new RENAME TO categories')
  }
  const goalCols=db.exec('PRAGMA table_info(goals)')[0]?.values.map((v:any)=>String(v[1]))||[]
  if(goalCols.length && !goalCols.includes('auto_monthly')){ db.run('ALTER TABLE goals ADD COLUMN auto_monthly REAL DEFAULT 0') }
@@ -75,7 +87,7 @@ function migrate(){
     for(const tx of txs){
      const type=String(tx[1]), qty=Number(tx[2]||0), up=Number(tx[3]||0), amt=Number(tx[4]||0)
      if(type==='compra'||type==='aporte'){ const nq=q+qty; avg=nq>0&&qty>0?(q*avg+qty*up)/nq:(up||avg); q=nq; cost+=amt }
-     else if(type==='venda'||type==='resgate'){ if(qty>0&&q>0&&qty>q+1e-9){ coherent=false; break } const cr=qty>0?q*0+qty*avg:Math.min(cost,amt); cost=Math.max(0,cost-cr); q=Math.max(0,q-qty); computed.push({id:String(tx[5]),cost:Math.round(cr*100)/100,real:Math.round((amt-cr)*100)/100}) }
+     else if(type==='venda'||type==='resgate'){ if(qty>0&&q>0&&qty>q+1e-9){ coherent=false; break } const cr=qty>0?qty*avg:Math.min(cost,amt); cost=Math.max(0,cost-cr); q=Math.max(0,q-qty); computed.push({id:String(tx[5]),cost:Math.round(cr*100)/100,real:Math.round((amt-cr)*100)/100}) }
     }
     if(!coherent||Math.abs(q-Number(iv[1]||0))>0.0001) continue
     for(const c of computed) db.run('UPDATE investment_transactions SET cost_removed=?, realized_gain=? WHERE id=?',[c.cost,c.real,c.id])
@@ -87,7 +99,14 @@ function migrate(){
  persist()
 }
 function b64(bytes:Uint8Array){ let s=''; for(let i=0;i<bytes.length;i+=8192) s+=String.fromCharCode(...bytes.subarray(i,i+8192)); return btoa(s) }
-function persist(){ if(DB) localStorage.setItem(KEY,b64(DB.export())) }
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+function persistNow(){ if(DB) localStorage.setItem(KEY,b64(DB.export())) }
+function persist(){ if(persistTimer||!DB) return; persistTimer=setTimeout(()=>{ persistTimer=null; persistNow() },250) }
+export function flushPersist(){ if(persistTimer){ clearTimeout(persistTimer); persistTimer=null } persistNow() }
+if(typeof window!=='undefined'){
+  window.addEventListener('pagehide',flushPersist)
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushPersist() })
+}
 export async function listProducts():Promise<Product[]>{
  let db:any=await init(); const r=db.exec('SELECT * FROM products ORDER BY updated_at DESC')
  return r[0]?.values.map((v:any)=>({id:String(v[0]),name:String(v[1]),cost:Number(v[2]),freight:Number(v[3]),packaging:Number(v[4]),otherCosts:Number(v[5]),category:String(v[6]||'Geral'),salePrice:Number(v[7]||0),desiredMarginPct:Number(v[8]||20),marketplace:String(v[9]||'Venda direta'),createdAt:String(v[10]),updatedAt:String(v[11])}))||[]
@@ -103,7 +122,7 @@ export async function logSimulation(productId:string,payload:any){ const db:any=
 export async function getSetting(k:string){ let db:any=await init(); const r=db.exec(`SELECT value FROM app_settings WHERE key='${k.replace(/'/g,"''")}'`); return r[0]?.values[0]?.[0]?String(r[0].values[0][0]):''}
 export async function setSetting(k:string,v:string){ const db:any=await init(); db.run('INSERT OR REPLACE INTO app_settings VALUES(?,?)',[k,v]); persist()}
 export async function exportBackup(){ await init(); return DB!.export() }
-export async function importBackup(bytes:Uint8Array){ localStorage.setItem(KEY,b64(bytes)); DB=null; await init() }
+export async function importBackup(bytes:Uint8Array){ flushPersist(); localStorage.setItem(KEY,b64(bytes)); DB=null; await init() }
 export async function listTransactions(userId:string):Promise<Transaction[]>{ const db:any=await init(); const r=db.exec('SELECT * FROM transactions WHERE user_id=? ORDER BY date DESC, created_at DESC',[userId]); return r[0]?.values.map((v:any)=>({id:String(v[0]),description:String(v[1]),amount:Number(v[2]),type:v[3]==='in'?'in':'out',category:String(v[4]||'Outros'),date:String(v[5]),note:String(v[6]||''),createdAt:String(v[7])}))||[] }
 export async function addTransaction(t:Transaction){ const db:any=await init(); t.createdAt=t.createdAt||todayISO(); db.run('INSERT OR REPLACE INTO transactions VALUES(?,?,?,?,?,?,?,?,?)',[t.id,t.description,Math.round(t.amount*100)/100,t.type,t.category,t.date,t.note||'',t.createdAt,t.userId]); persist(); return t }
 export async function deleteTransaction(id:string,userId:string){ const db:any=await init(); db.run('DELETE FROM transactions WHERE id=? AND user_id=?',[id,userId]); persist() }
@@ -125,9 +144,9 @@ export async function deleteRecurrence(id:string,userId:string){ const db:any=aw
 export async function listRecurrenceLaunches(userId:string):Promise<{recurrenceId:string;month:string}[]>{ const db:any=await init(); const r=db.exec('SELECT recurrence_id, month FROM recurrence_launches WHERE user_id=?',[userId]); return r[0]?.values.map((v:any)=>({recurrenceId:String(v[0]),month:String(v[1])}))||[] }
 export async function markRecurrenceLaunched(recurrenceId:string,month:string,userId:string){ const db:any=await init(); db.run('INSERT OR IGNORE INTO recurrence_launches VALUES(?,?,?)',[recurrenceId,month,userId]); persist() }
 export async function wasRecurrenceLaunched(recurrenceId:string,month:string,userId:string){ const all=await listRecurrenceLaunches(userId); return all.some(l=>l.recurrenceId===recurrenceId&&l.month===month) }
-export async function listCategories(userId:string):Promise<Category[]>{ const db:any=await init(); const r=db.exec("SELECT name,type FROM categories WHERE user_id=? OR user_id IS NULL OR user_id='' ORDER BY type, name",[userId]); return r[0]?.values.map((v:any)=>({name:String(v[0]),type:v[1]==='in'?'in':'out'}))||[] }
+export async function listCategories(userId:string):Promise<Category[]>{ const db:any=await init(); const r=db.exec("SELECT DISTINCT name,type FROM categories WHERE user_id=? OR user_id IS NULL OR user_id='' ORDER BY type, name",[userId]); return r[0]?.values.map((v:any)=>({name:String(v[0]),type:v[1]==='in'?'in':'out'}))||[] }
 export async function addCategory(name:string,type:'in'|'out',userId:string){ const db:any=await init(); db.run('INSERT OR IGNORE INTO categories VALUES(?,?,?)',[name.trim(),type,userId]); persist() }
-export async function deleteCategory(name:string,type:'in'|'out',userId:string){ const db:any=await init(); db.run('DELETE FROM categories WHERE name=? AND type=? AND user_id=?',[name,type,userId]); persist() }
+export async function deleteCategory(name:string,type:'in'|'out',userId:string){ const db:any=await init(); db.run("DELETE FROM categories WHERE name=? AND type=? AND (user_id=? OR user_id IS NULL OR user_id='')",[name,type,userId]); persist() }
 export async function clearAllData(userId:string){ const db:any=await init(); for (const tbl of ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investment_transactions','investments']) { try { db.run(`DELETE FROM ${tbl} WHERE user_id=?`,[userId]) } catch {} } persist() }
 export async function listInvestments(userId:string):Promise<Investment[]>{ const db:any=await init(); const r=db.exec('SELECT * FROM investments WHERE user_id=? ORDER BY name ASC',[userId]); return r[0]?.values.map((v:any)=>({id:String(v[0]),userId:String(v[1]),name:String(v[2]),category:String(v[3]||'Outros'),ticker:String(v[4]||''),institution:String(v[5]||''),quantity:Number(v[6]||0),averagePrice:Number(v[7]||0),investedAmount:Number(v[8]||0),currentValue:Number(v[9]||0),startedAt:String(v[10]||''),notes:String(v[11]||''),createdAt:String(v[12]),updatedAt:String(v[13])}))||[] }
 export async function upsertInvestment(inv:Investment){ const db:any=await init(); const ex=db.exec('SELECT user_id FROM investments WHERE id=?',[inv.id])[0]?.values[0]?.[0]; if(ex!=null&&String(ex)!==inv.userId) throw new Error('Investimento pertence a outro usuário'); inv.updatedAt=todayISO(); if(!inv.createdAt) inv.createdAt=inv.updatedAt; db.run('INSERT OR REPLACE INTO investments VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[inv.id,inv.userId,inv.name,inv.category,inv.ticker,inv.institution,Math.round(inv.quantity*1e8)/1e8,Math.round(inv.averagePrice*100)/100,Math.round(inv.investedAmount*100)/100,Math.round(inv.currentValue*100)/100,inv.startedAt,inv.notes,inv.createdAt,inv.updatedAt]); persist(); return inv }
@@ -135,7 +154,8 @@ export async function deleteInvestment(id:string,userId:string){ const db:any=aw
 const mapItx=(v:any):InvestmentTransaction=>({id:String(v[0]),investmentId:String(v[1]),userId:String(v[2]),type:v[3],quantity:Number(v[4]||0),unitPrice:Number(v[5]||0),amount:Number(v[6]||0),date:String(v[7]),description:String(v[8]||''),createdAt:String(v[9]),costRemoved:Number(v[10]||0),realizedGain:Number(v[11]||0)})
 export async function listInvestmentTransactions(investmentId:string,userId:string):Promise<InvestmentTransaction[]>{ const db:any=await init(); const r=db.exec('SELECT id,investment_id,user_id,type,quantity,unit_price,amount,date,description,created_at,cost_removed,realized_gain FROM investment_transactions WHERE investment_id=? AND user_id=? ORDER BY date DESC, created_at DESC',[investmentId,userId]); return r[0]?.values.map(mapItx)||[] }
 export async function listAllInvestmentTransactions(userId:string):Promise<InvestmentTransaction[]>{ const db:any=await init(); const r=db.exec('SELECT id,investment_id,user_id,type,quantity,unit_price,amount,date,description,created_at,cost_removed,realized_gain FROM investment_transactions WHERE user_id=? ORDER BY date ASC',[userId]); return r[0]?.values.map(mapItx)||[] }
-export async function addInvestmentTransaction(tx:InvestmentTransaction, updated:Investment){ const db:any=await init(); const own=db.exec('SELECT id FROM investments WHERE id=? AND user_id=?',[tx.investmentId,tx.userId])[0]?.values[0]?.[0]; if(!own) throw new Error('Investimento não encontrado para este usuário'); tx.createdAt=tx.createdAt||todayISO(); db.run('INSERT INTO investment_transactions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[tx.id,tx.investmentId,tx.userId,tx.type,Math.round(tx.quantity*1e8)/1e8,Math.round(tx.unitPrice*100)/100,Math.round(tx.amount*100)/100,tx.date,tx.description||'',tx.createdAt,Math.round((tx.costRemoved||0)*100)/100,Math.round((tx.realizedGain||0)*100)/100]); db.run('UPDATE investments SET quantity=?, average_price=?, invested_amount=?, current_value=?, updated_at=? WHERE id=? AND user_id=?',[Math.round(updated.quantity*1e8)/1e8,Math.round(updated.averagePrice*100)/100,Math.round(updated.investedAmount*100)/100,Math.round(updated.currentValue*100)/100,todayISO(),updated.id,updated.userId]); persist(); return tx }
+export async function getInvestmentTransaction(txId:string,userId:string):Promise<InvestmentTransaction|null>{ const db:any=await init(); const r=db.exec('SELECT id,investment_id,user_id,type,quantity,unit_price,amount,date,description,created_at,cost_removed,realized_gain FROM investment_transactions WHERE id=? AND user_id=?',[txId,userId]); return r[0]?.values.length?mapItx(r[0].values[0]):null }
+export async function addInvestmentTransaction(tx:InvestmentTransaction, updated:Investment){ const db:any=await init(); const own=db.exec('SELECT id FROM investments WHERE id=? AND user_id=?',[tx.investmentId,tx.userId])[0]?.values[0]?.[0]; if(!own) throw new Error('Investimento não encontrado para este usuário'); tx.createdAt=tx.createdAt||todayISO(); db.run('INSERT OR REPLACE INTO investment_transactions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[tx.id,tx.investmentId,tx.userId,tx.type,Math.round(tx.quantity*1e8)/1e8,Math.round(tx.unitPrice*100)/100,Math.round(tx.amount*100)/100,tx.date,tx.description||'',tx.createdAt,Math.round((tx.costRemoved||0)*100)/100,Math.round((tx.realizedGain||0)*100)/100]); db.run('UPDATE investments SET quantity=?, average_price=?, invested_amount=?, current_value=?, updated_at=? WHERE id=? AND user_id=?',[Math.round(updated.quantity*1e8)/1e8,Math.round(updated.averagePrice*100)/100,Math.round(updated.investedAmount*100)/100,Math.round(updated.currentValue*100)/100,todayISO(),updated.id,updated.userId]); persist(); return tx }
 export async function deleteInvestmentTransaction(txId:string,userId:string,updated:Investment){ const db:any=await init(); const own=db.exec('SELECT id FROM investment_transactions WHERE id=? AND user_id=?',[txId,userId])[0]?.values[0]?.[0]; if(!own) throw new Error('Movimentação não encontrada para este usuário'); db.run('DELETE FROM investment_transactions WHERE id=? AND user_id=?',[txId,userId]); db.run('UPDATE investments SET quantity=?, average_price=?, invested_amount=?, current_value=?, updated_at=? WHERE id=? AND user_id=?',[Math.round(updated.quantity*1e8)/1e8,Math.round(updated.averagePrice*100)/100,Math.round(updated.investedAmount*100)/100,Math.round(updated.currentValue*100)/100,todayISO(),updated.id,updated.userId]); persist(); return updated }
 export async function replaceInvestmentTransaction(oldTxId:string, tx:InvestmentTransaction, updated:Investment){ const db:any=await init(); const own=db.exec('SELECT id FROM investment_transactions WHERE id=? AND user_id=?',[oldTxId,tx.userId])[0]?.values[0]?.[0]; if(!own) throw new Error('Movimentação não encontrada para este usuário'); db.run('UPDATE investment_transactions SET investment_id=?,type=?,quantity=?,unit_price=?,amount=?,date=?,description=?,cost_removed=?,realized_gain=? WHERE id=? AND user_id=?',[tx.investmentId,tx.type,Math.round(tx.quantity*1e8)/1e8,Math.round(tx.unitPrice*100)/100,Math.round(tx.amount*100)/100,tx.date,tx.description||'',Math.round((tx.costRemoved||0)*100)/100,Math.round((tx.realizedGain||0)*100)/100,oldTxId,tx.userId]); db.run('UPDATE investments SET quantity=?, average_price=?, invested_amount=?, current_value=?, updated_at=? WHERE id=? AND user_id=?',[Math.round(updated.quantity*1e8)/1e8,Math.round(updated.averagePrice*100)/100,Math.round(updated.investedAmount*100)/100,Math.round(updated.currentValue*100)/100,todayISO(),updated.id,updated.userId]); persist(); return updated }
 const SYNC_TABLES = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions']
@@ -153,7 +173,7 @@ export async function getSyncMeta(entity:string,userId:string){ const db:any=awa
 export async function setSyncMeta(entity:string,userId:string,meta:Map<string,any>){ const db:any=await init(); db.run('DELETE FROM sync_meta WHERE entity=? AND user_id=?',[entity,userId]); for (const [rid,mm] of meta) db.run('INSERT INTO sync_meta VALUES(?,?,?,?,?)',[entity,userId,rid,mm.hash,mm.version]); persist() }
 export async function getSyncState(entity:string){ const db:any=await init(); const r=db.exec('SELECT last_pulled_at,last_sync_at FROM sync_state WHERE entity=?',[entity]); return r[0]?.values[0] ? { lastPulledAt: String(r[0].values[0][0]||''), lastSyncAt: String(r[0].values[0][1]||'') } : { lastPulledAt: '', lastSyncAt: '' } }
 export async function setSyncState(entity:string,lastPulledAt:string,lastSyncAt:string){ const db:any=await init(); db.run('INSERT OR REPLACE INTO sync_state VALUES(?,?,?)',[entity,lastPulledAt,lastSyncAt]); persist() }
-export async function addSyncConflicts(conflicts:any[],userId:string){ const db:any=await init(); for (const c of conflicts) db.run('INSERT OR REPLACE INTO sync_conflicts VALUES(?,?,?,?,?,?,?,?,?,?,?)',[c.id,c.entity,userId,c.recordId,JSON.stringify(c.local),JSON.stringify(c.remote),c.localVersion,c.remoteVersion,c.createdAt,c.resolvedAt||'']); persist() }
+export async function addSyncConflicts(conflicts:any[],userId:string){ const db:any=await init(); for (const c of conflicts) { db.run("DELETE FROM sync_conflicts WHERE user_id=? AND entity=? AND record_id=? AND resolved_at IS NULL",[userId,c.entity,c.recordId]); db.run('INSERT OR REPLACE INTO sync_conflicts VALUES(?,?,?,?,?,?,?,?,?,?,?)',[c.id,c.entity,userId,c.recordId,JSON.stringify(c.local),JSON.stringify(c.remote),c.localVersion,c.remoteVersion,c.createdAt,c.resolvedAt||'']); } persist() }
 export async function listSyncConflicts(userId:string){ const db:any=await init(); const r=db.exec('SELECT id,entity,record_id,local,remote,local_version,remote_version,created_at,resolved_at FROM sync_conflicts WHERE user_id=? AND resolved_at IS NULL ORDER BY created_at ASC',[userId]); return (r[0]?.values||[]).map((v:any)=>({id:String(v[0]),entity:v[1],recordId:String(v[2]),local:JSON.parse(String(v[3])),remote:JSON.parse(String(v[4])),localVersion:Number(v[5]||0),remoteVersion:Number(v[6]||0),createdAt:String(v[7]),resolvedAt:String(v[8]||'')})) }
 export async function resolveSyncConflict(id:string){ const db:any=await init(); db.run("UPDATE sync_conflicts SET resolved_at=? WHERE id=?",[todayISO(),id]); persist() }
 /** Migração de dados legados: conta registros por dono e reatribui o dono legado à conta autenticada. */

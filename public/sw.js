@@ -1,11 +1,29 @@
 // NoAzul PWA service worker — cache-first para assets estáticos, network-first para HTML.
 // Dados financeiros (sql.js/localStorage) NÃO passam por aqui.
-// v2: invalida cache v1 que envenenou sql-wasm-browser.wasm com HTML (index.html).
-const CACHE = 'noazul-v3';
-const CORE = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg'];
+// v4: precacheia o WASM com validação de content-type e faz cache-first em assets estáticos
+// (permite abrir o app offline mesmo depois de recarregar a página).
+const CACHE = 'noazul-v4';
+const CORE = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg', '/termos.html', '/privacidade.html'];
+const WASM = '/sql-wasm-browser.wasm';
+
+async function putSafe(request, res) {
+  if (!res || !res.ok) return;
+  if (String(request.url).endsWith('.wasm') && !(res.headers.get('content-type') || '').includes('wasm')) return;
+  const copy = res.clone();
+  const cache = await caches.open(CACHE);
+  await cache.put(request, copy);
+}
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(CORE);
+    try {
+      const res = await fetch(WASM, { cache: 'reload' });
+      await putSafe(new Request(WASM), res);
+    } catch { /* sem rede no install: o fetch normal tenta depois */ }
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
@@ -21,19 +39,24 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== location.origin) return; // Supabase/workers = rede sempre
-  if (url.pathname.endsWith('.wasm')) return; // sql.js: sempre da rede, nunca do cache (evita HTML envenenado)
+  if (url.pathname === '/sw.js') return;
   if (request.mode === 'navigate') {
     e.respondWith(fetch(request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put('/index.html', copy));
+      putSafe(new Request('/index.html'), res.clone());
       return res;
     }).catch(() => caches.match('/index.html')));
     return;
   }
-  e.respondWith(
-    caches.match(request).then((hit) => hit || fetch(request).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(request, copy)); }
+  const staticAsset = url.pathname.startsWith('/assets/') || /\.(?:wasm|woff2?|ttf|otf|png|jpe?g|gif|svg|ico|css|js)$/i.test(url.pathname);
+  if (staticAsset) {
+    e.respondWith(caches.match(request).then((hit) => hit || fetch(request).then((res) => {
+      putSafe(request, res.clone());
       return res;
-    }).catch(() => caches.match('/index.html')))
-  );
+    })));
+    return;
+  }
+  e.respondWith(fetch(request).then((res) => {
+    putSafe(request, res.clone());
+    return res;
+  }).catch(() => caches.match(request)));
 });

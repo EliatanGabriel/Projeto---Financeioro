@@ -1,6 +1,6 @@
 # NoAzul — Supabase (Auth + sincronização)
 
-Status: **Fase 2 (migrations + configuração)**. Auth/sync serão implementadas nas Fases 3–5.
+Status: **Fases 1–4 concluídas** (migrations, Auth, sync e resolução de conflitos). A Fase 5 (Edge Function de exclusão de conta) é opcional/para produção.
 Sem as variáveis abaixo, o app continua em **modo local/offline** como hoje.
 
 ## Configuração para o dono (uma vez)

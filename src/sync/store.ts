@@ -16,7 +16,7 @@ const UPSERTS: Record<string, (row: any, u: string) => Promise<any>> = {
   bill_payments: (r, u) => db.setBillPaid(r.billId, r.month, true, u).then(() => r), recurrences: (r, u) => db.upsertRecurrence({ ...r, userId: u }),
   recurrence_launches: (r, u) => db.markRecurrenceLaunched(r.recurrenceId, r.month, u).then(() => r), categories: (r, u) => db.addCategory(r.name, r.type, u).then(() => r),
   goal_auto_launches: (r, u) => db.markGoalAutoLaunched(r.goalId, r.month, u).then(() => r), investments: (r, u) => db.upsertInvestment({ ...r, userId: u }),
-  investment_transactions: async (r, u) => { const invs = await db.listInvestments(u); const inv = invs.find((i: any) => i.id === r.investmentId); if (!inv) throw new Error('Investimento não encontrado para este usuário'); const { applyTransactionDetailed } = await import('../calculations/investments'); const { investment: updated, costRemoved, realizedGain } = applyTransactionDetailed(inv, r); return db.addInvestmentTransaction({ ...r, costRemoved, realizedGain }, updated) },
+  investment_transactions: async (r, u) => { const invs = await db.listInvestments(u); const inv = invs.find((i: any) => i.id === r.investmentId); if (!inv) throw new Error('Investimento não encontrado para este usuário'); const { applyTransactionDetailed, reverseTransaction } = await import('../calculations/investments'); const existing = await db.getInvestmentTransaction(r.id, u); let base: any = inv; if (existing && existing.investmentId === r.investmentId) { const same = existing.type === r.type && Math.abs(existing.amount - (r.amount || 0)) < 0.005 && Math.abs((existing.quantity || 0) - (r.quantity || 0)) < 1e-8 && Math.abs((existing.unitPrice || 0) - (r.unitPrice || 0)) < 0.005 && existing.date === r.date && (existing.description || '') === (r.description || ''); if (same) return existing; base = reverseTransaction(inv, existing) } const { investment: updated, costRemoved, realizedGain } = applyTransactionDetailed(base, r); return db.addInvestmentTransaction({ ...r, costRemoved, realizedGain }, updated) },
 }
 const DELETES: Record<string, (id: string, u: string) => Promise<any>> = {
   transactions: (id, u) => db.deleteTransaction(id, u), fixed_bills: (id, u) => db.deleteFixedBill(id, u), goals: (id, u) => db.deleteGoal(id, u),
@@ -34,8 +34,7 @@ export function makeSyncStore(userId: string) {
     async replaceLocal(entity: SyncEntity, rows: SyncRow[]) {
       for (const row of rows) {
         const up = UPSERTS[entity]; if (!up) continue
-        if (entity === 'investment_transactions') { const invs = await db.listInvestments(userId); const inv = invs.find((i: any) => i.id === row.investmentId); if (inv) { const { applyTransactionDetailed } = await import('../calculations/investments'); const { investment: updated } = applyTransactionDetailed(inv, row as any); await up(row, userId); await db.upsertInvestment(updated) } else await up(row, userId) }
-        else await up(row, userId)
+        await up(row, userId)
       }
     },
     async getMeta(entity: SyncEntity) { return db.getSyncMeta(entity, userId) },
