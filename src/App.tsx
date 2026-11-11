@@ -290,46 +290,44 @@ export default function App() {
               <div>
                 <div className="flex items-center justify-between mb-3"><h2 className="font-extrabold text-lg">Visão geral</h2><span className="muted text-xs">Tudo em um só lugar</span></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <div className="card p-5">
+                  <div className="stat-card">
                     <div className="flex items-center justify-between">
                       <div className="stat-icon up"><Wallet size={20} /></div>
-                      <span className="badge" style={{ background: s.balance >= 0 ? '#D1FAE5' : '#FFE4E6', color: s.balance >= 0 ? '#065F46' : '#9F1239' }}>Mês {s.balance >= 0 ? '+' : ''}{brl(s.balance)}</span>
+                      <div className="stat-info">
+                        <div className="stat-label">Saldo em contas</div>
+                        <div className="stat-value">{brl(s.balance >= 0 ? s.balance : -s.balance)}{s.balance >= 0 ? '' : ''}</div>
+                      </div>
                     </div>
-                    <div className="muted text-xs font-bold uppercase mt-3">Saldo em contas</div>
-                    <div className={`text-2xl font-extrabold mt-1 ${overall < 0 ? 'text-rose-600' : ''}`}>{brl(overall)}</div>
-                    <div className="muted text-xs mt-1">Entrou {brl(s.income)} • Saiu {brl(s.expense)} no mês</div>
                   </div>
-                  <div className="card p-5">
+                  <div className="stat-card light">
                     <div className="flex items-center justify-between">
-                      <div className="stat-icon up"><TrendingUp size={20} /></div>
-                      {invSummary.count > 0 && <span className="badge" style={{ background: invSummary.totalReturn >= 0 ? '#D1FAE5' : '#FFE4E6', color: invSummary.totalReturn >= 0 ? '#065F46' : '#9F1239' }}>{invSummary.totalReturn >= 0 ? '+' : ''}{invSummary.totalReturnPct}%</span>}
+                      <div className="stat-icon neutral"><TrendingUp size={20} /></div>
+                      <div className="stat-info">
+                        <div className="stat-label">Investimentos</div>
+                        <div className="stat-value">{invSummary.count > 0 ? brl(invSummary.totalCurrent) : '0'}</div>
+                        <div className="stat-change {invSummary.totalReturn >= 0 ? 'up' : 'down'}">{invSummary.totalReturn >= 0 ? '+' : ''}{brl(invSummary.totalReturnPct)}%</div>
+                      </div>
                     </div>
-                    <div className="muted text-xs font-bold uppercase mt-3">Investimentos</div>
-                    <div className="text-2xl font-extrabold mt-1">{brl(invSummary.totalCurrent)}</div>
-                    <div className="muted text-xs mt-1">{invSummary.count ? `Aplicado ${brl(invSummary.totalInvested)} • retorno ${invSummary.totalReturn >= 0 ? '+' : ''}${brl(invSummary.totalReturn)}` : 'Nenhum investimento cadastrado ainda'}</div>
-                    <button className="link text-xs mt-2" onClick={() => setTab('investimentos')}>{invSummary.count ? 'Ver carteira' : 'Cadastrar investimento'}</button>
                   </div>
-                  <div className="card p-5">
+                  <div className="stat-card light">
                     <div className="flex items-center justify-between">
-                      <div className="stat-icon up"><PiggyBank size={20} /></div>
-                      {goalsTotals.count > 0 && <span className="badge" style={{ background: '#D1FAE5', color: '#065F46' }}>{goalsTotals.pct}%</span>}
+                      <div className="stat-icon neutral"><PiggyBank size={20} /></div>
+                      <div className="stat-info">
+                        <div className="stat-label">Metas</div>
+                        <div className="stat-value">{goalsTotals.count > 0 ? brl(goalsTotals.saved) : '0'}</div>
+                        <div className="stat-change pill pill-primary">{goalsTotals.pct}%</div>
+                      </div>
                     </div>
-                    <div className="muted text-xs font-bold uppercase mt-3">Metas</div>
-                    <div className="text-2xl font-extrabold mt-1">{brl(goalsTotals.saved)}</div>
-                    <div className="progress mt-2"><div style={{ width: Math.min(100, goalsTotals.pct) + '%' }} /></div>
-                    <div className="muted text-xs mt-1">{goalsTotals.count ? `de ${brl(goalsTotals.target)} • faltam ${brl(goalsTotals.remaining)}` : 'Defina sua primeira meta'}</div>
-                    <button className="link text-xs mt-2" onClick={() => setTab('metas')}>{goalsTotals.done > 0 ? `${goalsTotals.done} de ${goalsTotals.count} concluídas` : 'Ver metas'}</button>
                   </div>
-                  <div className="card p-5">
+                  <div className="stat-card light">
                     <div className="flex items-center justify-between">
                       <div className="stat-icon neutral"><Receipt size={20} /></div>
-                      {billsTotals.count > 0 && <span className="badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{billsTotals.pct}% pagas</span>}
+                      <div className="stat-info">
+                        <div className="stat-label">Contas fixas</div>
+                        <div className="stat-value">{billsTotals.count > 0 ? brl(bsum.paidTotal) : '0'}</div>
+                        <div className="stat-change pill pill-secondary">{billsTotals.pct}% pagas</div>
+                      </div>
                     </div>
-                    <div className="muted text-xs font-bold uppercase mt-3">Contas fixas do mês</div>
-                    <div className="text-2xl font-extrabold mt-1">{brl(bsum.paidTotal)}</div>
-                    <div className="progress mt-2"><div style={{ width: Math.min(100, billsTotals.pct) + '%' }} /></div>
-                    <div className="muted text-xs mt-1">{billsTotals.count ? `${billsTotals.paidCount} de ${billsTotals.count} pagas • ${brl(bsum.pendingTotal)} pendente` : 'Nenhuma conta fixa cadastrada'}</div>
-                    <button className="link text-xs mt-2" onClick={() => setTab('contas')}>Ver contas</button>
                   </div>
                 </div>
               </div>
@@ -361,10 +359,10 @@ export default function App() {
               {investments.length > 0 && <section className="card p-5">
                 <div className="flex justify-between items-center"><h2 className="font-bold">Investimentos</h2><button className="link" onClick={() => setTab('investimentos')}>Ver carteira</button></div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-                  <div><div className="muted text-xs font-bold uppercase">Valor atual</div><div className="text-xl font-extrabold mt-1">{brl(invSummary.totalCurrent)}</div></div>
+                  <div><div className="muted text-xs font-bold uppercase">Valor atual</div><div className="hero-value">{brl(invSummary.totalCurrent)}</div></div>
                   <div><div className="muted text-xs font-bold uppercase">Aplicado</div><div className="text-xl font-extrabold mt-1">{brl(invSummary.totalInvested)}</div></div>
-                  <div><div className="muted text-xs font-bold uppercase">Retorno total</div><div className={`text-xl font-extrabold mt-1 ${invSummary.totalReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{invSummary.totalReturn >= 0 ? '+' : ''}{brl(invSummary.totalReturn)} <span className="text-xs font-bold">({invSummary.totalReturnPct}%)</span></div></div>
-                  <div><div className="muted text-xs font-bold uppercase">Rendimentos</div><div className="text-xl font-extrabold mt-1">{brl(invSummary.income)}</div></div>
+                  <div><div className="muted text-xs font-bold uppercase">Retorno total</div><div className="hero-value {invSummary.totalReturn >= 0 ? 'up' : 'down'}">{invSummary.totalReturn >= 0 ? '+' : ''}{brl(invSummary.totalReturn)} <span className="text-xs font-bold">({invSummary.totalReturnPct}%)</span></div></div>
+                  <div><div className="muted text-xs font-bold uppercase">Rendimentos</div><div className="hero-value">{brl(invSummary.income)}</div></div>
                 </div>
                 <div className="mt-4 border-t pt-3 space-y-3" style={{ borderColor: 'var(--border)' }}>{invSummary.perInvestment.slice(0, 3).map((inv: any) => <div key={inv.id} className="flex items-center justify-between gap-3">
                   <div className="min-w-0"><div className="font-bold text-sm truncate">{inv.name}{inv.ticker ? ` (${inv.ticker})` : ''}</div><div className="muted text-xs truncate">{inv.category}{inv.institution ? ` • ${inv.institution}` : ''}</div></div>
