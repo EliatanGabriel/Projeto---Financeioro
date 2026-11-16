@@ -3,3 +3,5 @@ export const pct=(v:number)=>new Intl.NumberFormat('pt-BR',{minimumFractionDigit
 export const num=(s:string)=>{let t=String(s??'').trim().replace(/[^\d.,-]/g,'');if(!t||t==='-'||t==='.'||t===',')return 0;if(t.includes('.')&&t.includes(','))t=t.replace(/\./g,'').replace(',','.');else t=t.replace(',','.');const n=parseFloat(t);return isNaN(n)?0:n}
 export const newId=()=> (crypto as any)?.randomUUID?.() ?? Date.now().toString(36)+Math.random().toString(36).slice(2,9)
 export const todayISO=()=>new Date().toISOString()
+export const showConfirm=(msg:string)=>confirm(msg)
+export const confirm=(msg:string)=>new Promise<boolean>(res => res(showConfirm(msg)))

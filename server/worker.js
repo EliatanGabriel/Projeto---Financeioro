@@ -599,6 +599,7 @@ export async function processEvent(payload, kv) {
 }
 
 const json = (obj, status = 200, extraHeaders = {}) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type', ...extraHeaders } })
+const jsonPrivate = (obj, status = 200, extraHeaders = {}) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': 'no-referrer', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type', ...extraHeaders } })
 
 async function adminGate(request, env, token) {
   if (!env.LICENSE_DO) return { status: 500, body: { ok: false, error: 'do_not_configured' } }
@@ -731,23 +732,30 @@ export default {
       try { body = JSON.parse(await request.text() || '{}') } catch { return json({ ok: false, error: 'invalid_json', message: 'Requisição inválida.' }, 400) }
       const email = normalizeEmail(body.email)
       if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
+      const rateKey = `portal_status_rate:${email}`
+      const last = await env.LICENSE_DO.get(rateKey)
+      const NOW = Date.now()
+      if (last && NOW - Number(last) < 60000) {
+        return json({ ok: false, error: 'rate_limited', message: 'Tente novamente em 1 minuto.' }, 429, { 'retry-after': '60' })
+      }
+      await env.LICENSE_DO.put(rateKey, String(NOW), { expiry: 900 })
       const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName(email))
       const r = await stub.fetch('https://license-store/internal/portal-status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
       return json(await r.json().catch(() => ({ ok: false, error: 'failed', message: 'Tente novamente.' })), r.status)
     }
     if (url.pathname === '/admin/licenses' && request.method === 'POST') {
       let body = {}
-      try { body = JSON.parse(await request.text() || '{}') } catch { return json({ ok: false, error: 'invalid_json' }, 400) }
+      try { body = JSON.parse(await request.text() || '{}') } catch { return jsonPrivate({ ok: false, error: 'invalid_json' }, 400) }
       const gate = await adminGate(request, env, body.token)
-      if (gate.status === 429) return json({ ok: false, error: 'rate_limited' }, 429, { 'retry-after': String(gate.retryAfter || 900) })
-      if (gate.status !== 200) return json(gate.body, gate.status)
+      if (gate.status === 429) return jsonPrivate({ ok: false, error: 'rate_limited' }, 429, { 'retry-after': String(gate.retryAfter || 900) })
+      if (gate.status !== 200) return jsonPrivate(gate.body, gate.status)
       const email = body.email ? normalizeEmail(body.email) : ''
-      if (body.email && !email) return json({ ok: false, error: 'invalid_email' }, 400)
+      if (body.email && !email) return jsonPrivate({ ok: false, error: 'invalid_email' }, 400)
       const limit = Math.min(50, Math.max(1, Number(body.limit) || 25))
       try {
         const data = await listLicenses(env, email, body.cursor, limit)
-        return json({ ok: true, ...data })
-      } catch { return json({ ok: false, error: 'registry_failed' }, 500) }
+        return jsonPrivate({ ok: true, ...data })
+      } catch { return jsonPrivate({ ok: false, error: 'registry_failed' }, 500) }
     }
 
     if (url.pathname === '/webhook/cakto' && request.method === 'POST') {
@@ -1030,6 +1038,13 @@ export default {
       if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
       if (!deviceId) return json({ ok: false, error: 'device_required', message: 'Identificação do aparelho ausente.' }, 400)
       if (!env.LICENSE_DO) return json({ ok: false, error: 'do_not_configured' }, 500)
+      const rateKey = `license_rate:${email}`
+      const last = await env.LICENSE_DO.get(rateKey)
+      const NOW = Date.now()
+      if (last && NOW - Number(last) < 60000) {
+        return json({ ok: false, error: 'rate_limited', message: 'Tente novamente em 1 minuto.' }, 429, { 'retry-after': '60' })
+      }
+      await env.LICENSE_DO.put(rateKey, String(NOW), { expiry: 900 })
       const opId = crypto.randomUUID()
       try { await freezeAcquire(env, opId) } catch (e) { const s = e?.status || 500; return json({ ok: false, error: s === 503 ? 'frozen' : 'registry_failed' }, s === 503 ? 503 : 500) }
       try {

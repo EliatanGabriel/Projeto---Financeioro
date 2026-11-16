@@ -3,8 +3,6 @@ import { canonicalHash } from './engine'
 import { stableId } from './mapping'
 import type { SyncEntity, SyncRow, SyncQueueOp, SyncConflict } from './engine'
 
-export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals','budgets','bill_payments','recurrences','recurrence_launches','categories','goal_auto_launches','investments','investment_transactions','credit_cards','credit_card_purchases','credit_card_payments']
-
 const LISTERS: Record<string, (u: string) => Promise<any[]>> = {
   transactions: u => db.listTransactions(u), fixed_bills: u => db.listFixedBills(u), goals: u => db.listGoals(u),
   budgets: u => db.listBudgets(u), bill_payments: u => db.listBillPayments(u), recurrences: u => db.listRecurrences(u),

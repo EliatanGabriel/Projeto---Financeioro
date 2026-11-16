@@ -1,21 +1,19 @@
 import type {PricingInputs,PricingResult,Scenario} from '../types'
-import {z} from 'zod'
 const toCents=(v:number)=>Math.round((Number(v)||0)*100)
 const fromCents=(c:number)=>Math.round(c)/100
-export const PricingSchema=z.object({
- name:z.string().max(120).default(''), cost:z.number().min(0).max(1e9), freight:z.number().min(0).max(1e9),
- packaging:z.number().min(0).max(1e9), otherCosts:z.number().min(0).max(1e9),
- taxPct:z.number().min(0).max(100), marketplacePct:z.number().min(0).max(100),
- paymentPct:z.number().min(0).max(100), fixedFee:z.number().min(0).max(1e7),
- desiredMarginPct:z.number().min(0).max(95), salePrice:z.number().min(0).max(1e9)
-})
 export function validatePricing(i:PricingInputs):string[]{
- const p=PricingSchema.safeParse(i); const errs:string[]=[]
- if(!p.success) errs.push(...p.error.issues.map(x=>`${x.path.join('.')}: ${x.message}`))
+ const errs:string[]=[]
+ if(typeof i.cost!=='number'||i.cost<0) errs.push('Custo inválido.')
+ if(typeof i.freight!=='number'||i.freight<0) errs.push('Frete inválido.')
+ if(typeof i.packaging!=='number'||i.packaging<0) errs.push('Embalagem inválida.')
+ if(typeof i.otherCosts!=='number'||i.otherCosts<0) errs.push('Outros custos inválidos.')
+ if(typeof i.taxPct!=='number'||i.taxPct<0||i.taxPct>100) errs.push('Imposto inválido.')
+ if(typeof i.marketplacePct!=='number'||i.marketplacePct<0||i.marketplacePct>100) errs.push('Percentual de marketplace inválido.')
+ if(typeof i.paymentPct!=='number'||i.paymentPct<0||i.paymentPct>100) errs.push('Percentual de pagamento inválido.')
+ if(typeof i.desiredMarginPct!=='number'||i.desiredMarginPct<0||i.desiredMarginPct>95) errs.push('Margem desejada inválida.')
+ if(typeof i.salePrice!=='number'||i.salePrice<0) errs.push('Preço de venda inválido.')
  const pctSum=i.taxPct+i.marketplacePct+i.paymentPct+i.desiredMarginPct
  if(pctSum>=100) errs.push('Soma de percentuais + margem >= 100% — denominador inválido.')
- if(i.cost<0||i.freight<0||i.packaging<0||i.otherCosts<0||i.fixedFee<0||i.salePrice<0) errs.push('Valores monetários não podem ser negativos.')
- if(i.taxPct<0||i.marketplacePct<0||i.paymentPct<0||i.desiredMarginPct<0) errs.push('Percentuais não podem ser negativos.')
  return errs
 }
 export function calculatePricing(i:PricingInputs):PricingResult{

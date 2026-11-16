@@ -13,7 +13,7 @@ describe('sync — mapeamento local ↔ Supabase', () => {
   })
 
   it('toRemoteRow envia somente colunas da nuvem (sem id em PK composta)', () => {
-    expect(toRemoteRow('budgets', { id: 'Moradia', userId: 'u1', category: 'Moradia', limit: 500, version: 1 })).toEqual({ user_id: 'u1', category: 'Moradia', limit: 500, version: 1 })
+    expect(toRemoteRow('budgets', { id: 'Moradia', userId: 'u1', category: 'Moradia', limit: 500, version: 1 })).toEqual({ user_id: 'u1', category: 'Moradia', limit: 500 })
     expect(toRemoteRow('investment_transactions', { id: 'x', userId: 'u1', investmentId: 'i1', type: 'compra', quantity: 1, unitPrice: 10, amount: 10, date: '2026-01-01', description: '', costRemoved: 0, realizedGain: 0, createdAt: '2026-01-01T00:00:00.000Z', version: 1 } as any)).toEqual({ id: 'x', user_id: 'u1', investment_id: 'i1', type: 'compra', quantity: 1, unit_price: 10, amount: 10, date: '2026-01-01', description: '', cost_removed: 0, realized_gain: 0, created_at: '2026-01-01T00:00:00.000Z', version: 1 })
   })
 

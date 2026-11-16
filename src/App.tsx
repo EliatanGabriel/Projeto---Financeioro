@@ -34,6 +34,8 @@ async function currentPro(): Promise<boolean> {
   const r = await verifyLicense(key, getDeviceId()); return r.ok && isProActive(r.payload)
 }
 async function ensureMonthlyRecurrences(uid: string) {
+  const autoLaunch = await getSetting('recurrenceAutoLaunch')
+  if (autoLaunch === 'false') return
   const recs = await listRecurrences(uid)
   const launches = await listRecurrenceLaunches(uid); const now = new Date(); const month = monthKey(now)
   for (const r of recs.filter((x: any) => x.active && x.day <= now.getDate())) {
@@ -87,6 +89,7 @@ export default function App() {
   const [licenseApiUrl, setLicenseApiUrl] = useState('')
   const [showUpsell, setShowUpsell] = useState(false)
   const [userId, setUserId] = useState('')
+  ;(async () => { await setSetting('recurrenceAutoLaunch', 'true') })()
   const [investments, setInvestments] = useState<Investment[]>([])
   const [invTx, setInvTx] = useState<InvestmentTransaction[]>([])
   const [cards, setCards] = useState<CreditCard[]>([])
@@ -142,23 +145,25 @@ export default function App() {
       if (legacyTotal > 0 || ambiguous > 0) setMigration({ counts, legacyTotal, ambiguous })
     })()
   }, [authUser?.id])
-  useEffect(() => { if (authUser?.id) reload() }, [authUser?.id])
-  useEffect(() => { (async () => {
-    const uidNow = auth?.user?.id || (await getSetting('userId')) || getDeviceId()
-    try { await ensureMonthlyRecurrences(uidNow) } catch {}
-    await reload()
-    // Renovação automática: se a licença guardada expirou ou vence em ≤7 dias, busca a nova no servidor.
-    try {
-      const savedKey = await getSetting('licenseKey'); if (!savedKey) return
-      const v = await verifyLicense(savedKey, getDeviceId())
-      const days = v.payload ? proDaysLeft(v.payload) : 0
-      if (v.ok && isProActive(v.payload) && days > 7) return
-      const savedEmail = await getSetting('caktoEmail'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
-      if (!savedEmail || !isLicenseApiConfigured(api)) return
-      const r = await fetchAutoLicense(api, savedEmail, getDeviceId())
-      if (r.ok && r.key) { const nv = await verifyLicense(r.key, getDeviceId()); if (nv.ok && isProActive(nv.payload)) { await setSetting('licenseKey', r.key); await setSetting('licenseHolder', nv.payload!.holder); await setSetting('licenseExpires', nv.payload!.expiresAt || ''); await setSetting('plan', nv.payload!.plan); await reload() } }
-    } catch {}
-  })() }, [])
+  useEffect(() => {
+    if (authUser?.id) {
+      ;(async () => {
+        const uidNow = auth?.user?.id || (await getSetting('userId')) || getDeviceId()
+        try { await ensureMonthlyRecurrences(uidNow) } catch {}
+        await reload()
+        try {
+          const savedKey = await getSetting('licenseKey'); if (!savedKey) return
+          const v = await verifyLicense(savedKey, getDeviceId())
+          const days = v.payload ? proDaysLeft(v.payload) : 0
+          if (v.ok && isProActive(v.payload) && days > 7) return
+          const savedEmail = await getSetting('caktoEmail'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
+          if (!savedEmail || !isLicenseApiConfigured(api)) return
+          const r = await fetchAutoLicense(api, savedEmail, getDeviceId())
+          if (r.ok && r.key) { const nv = await verifyLicense(r.key, getDeviceId()); if (nv.ok && isProActive(nv.payload)) { await setSetting('licenseKey', r.key); await setSetting('licenseHolder', nv.payload!.holder); await setSetting('licenseExpires', nv.payload!.expiresAt || ''); await setSetting('plan', nv.payload!.plan) } }
+        } catch {}
+      })()
+    }
+  }, [authUser?.id])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark) }, [dark])
   useEffect(() => {
     let cancelled = false
@@ -188,7 +193,12 @@ export default function App() {
   const requirePro = () => { if (isPro) return true; setShowUpsell(true); return false }
   const checkout = getCheckoutUrl(checkoutUrl)
   const licenseApi = getLicenseApiUrl(licenseApiUrl)
-  const show = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2600) }
+  let toastTimer: ReturnType<typeof setTimeout> | null = null
+const show = (m: string) => { 
+  if (toastTimer) clearTimeout(toastTimer) 
+  setToast(m) 
+  toastTimer = setTimeout(() => setToast(''), 2600) 
+}
 
   const s = useMemo(() => summarize(tx, bills, month), [tx, bills, month])
   const history = useMemo(() => monthlyHistory(tx, 6), [tx])
@@ -417,13 +427,13 @@ export default function App() {
 }
 
 function Logo() { return <div className="flex items-center gap-3 px-1 py-2"><div className="logo-mark"><Wallet size={20} /></div><div><div className="font-extrabold text-lg leading-none">NoAzul</div><div className="muted text-xs mt-1">suas finanças no azul</div></div></div> }
-function Stat({ icon, label, value, tone }: any) { return <div className="card p-5"><div className={`stat-icon ${tone}`}>{icon}</div><div className="muted text-xs font-bold uppercase mt-3">{label}</div><div className="text-2xl font-extrabold mt-1">{value}</div></div> }
-function Empty({ text, action }: any) { return <div className="empty"><p className="muted text-sm">{text}</p>{action && <button className="btn mt-3" onClick={action}><Plus size={16} /> Adicionar</button>}</div> }
-function Field({ label, value, onChange, placeholder, type = 'text' }: any) { return <label className="block"><div className="label">{label}</div><input className="input" type={type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} /></label> }
-function GoalBar({ g }: any) { const p = goalProgress(g); return <div><div className="flex justify-between text-sm"><b>{g.name}</b><span className="muted">{brl(g.saved)} de {brl(g.target)}</span></div><div className="progress"><div style={{ width: p.pct + '%' }} /></div><div className="muted text-xs mt-1">{p.done ? 'Meta alcançada! Parabéns.' : `${p.pct}% • faltam ${brl(p.remaining)}${p.perMonth ? ` • guardando ${brl(p.perMonth)} por mês você chega lá` : ''}`}</div></div> }
-function BudgetBar({ b }: any) { const col = b.status === 'estourou' ? '#E11D63' : b.status === 'atencao' ? '#F59E0B' : GREEN; return <div><div className="flex justify-between text-sm"><b>{b.category}</b><span className="muted">{brl(b.spent)} de {brl(b.limit)}</span></div><div className="progress"><div style={{ width: Math.min(100, b.pct) + '%', background: col }} /></div><div className="text-xs mt-1" style={{ color: col }}>{b.status === 'estourou' ? `Passou ${brl(-b.remaining)} do limite` : b.status === 'atencao' ? `Faltam ${brl(b.remaining)} do limite` : `Ainda pode gastar ${brl(b.remaining)}`}</div></div> }
+function Stat({ icon, label, value, tone }: { icon: any; label: string; value: string; tone: string }) { return <div className="card p-5"><div className={`stat-icon ${tone}`}>{icon}</div><div className="muted text-xs font-bold uppercase mt-3">{label}</div><div className="text-2xl font-extrabold mt-1">{value}</div></div> }
+function Empty({ text, action }: { text: string; action: () => void }) { return <div className="empty"><p className="muted text-sm">{text}</p>{action && <button className="btn mt-3" onClick={action}><Plus size={16} /> Adicionar</button>}</div> }
+function Field({ label, value, onChange, placeholder, type = 'text' }: { label: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder?: string; type?: string }) { return <label className="block"><div className="label">{label}</div><input className="input" type={type || 'text'} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} /></label> }
+function GoalBar({ g }: { g: Goal }) { const p = goalProgress(g); return <div><div className="flex justify-between text-sm"><b>{g.name}</b><span className="muted">{brl(g.saved)} de {brl(g.target)}</span></div><div className="progress"><div style={{ width: p.pct + '%' }} /></div><div className="muted text-xs mt-1">{p.done ? 'Meta alcançada! Parabéns.' : `${p.pct}% • faltam ${brl(p.remaining)}${p.perMonth ? ` • guardando ${brl(p.perMonth)} por mês você chega lá` : ''}`}</div></div> }
+function BudgetBar({ b }: { b: Budget }) { const col = b.status === 'estourou' ? '#E11D63' : b.status === 'atencao' ? '#F59E0B' : GREEN; return <div><div className="flex justify-between text-sm"><b>{b.category}</b><span className="muted">{brl(b.spent)} de {brl(b.limit)}</span></div><div className="progress"><div style={{ width: Math.min(100, b.pct) + '%', background: col }} /></div><div className="text-xs mt-1" style={{ color: col }}>{b.status === 'estourou' ? `Passou ${brl(-b.remaining)} do limite` : b.status === 'atencao' ? `Faltam ${brl(b.remaining)} do limite` : `Ainda pode gastar ${brl(b.remaining)}`}</div></div> }
 
-function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, recurrences, launches, isPro, requirePro, enqueueDelete }: any) {
+function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, recurrences, launches, isPro, requirePro, enqueueDelete }: { userId: string; tx: Transaction[]; month: string; reload: () => Promise<void>; show: (m: string) => void; expenseCats: string[]; incomeCats: string[]; recurrences: Recurrence[]; launches: any[]; isPro: boolean; requirePro: () => boolean; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() })
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all')
@@ -469,14 +479,14 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
           <div className="flex-1 min-w-0"><div className="font-bold truncate">{t.description}</div><div className="muted text-xs">{t.category} • {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
           <b className={t.type === 'in' ? 'text-emerald-600' : ''}>{t.type === 'in' ? '+' : '−'} {brl(t.amount)}</b>
           <button className="iconbtn" onClick={() => edit(t)} aria-label="Editar"><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (!confirm('Apagar este lançamento?')) return; try { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar"><Trash2 size={15} /></button>
+          <button className="iconbtn" onClick={async () => { if (!await confirm('Apagar este lançamento?')) return; try { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar"><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
   </div>
 }
 
-function Recorrencias({ userId, recurrences, launches, month, reload, show, expenseCats, incomeCats, isPro, requirePro, enqueueDelete }: any) {
+function Recorrencias({ userId, recurrences, launches, month, reload, show, expenseCats, incomeCats, isPro, requirePro, enqueueDelete }: { userId: string; recurrences: Recurrence[]; launches: any[]; month: string; reload: () => Promise<void>; show: (m: string) => void; expenseCats: string[]; incomeCats: string[]; isPro: boolean; requirePro: () => boolean; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [form, setForm] = useState<any>({ description: '', amount: '', type: 'in', category: 'Salário', day: '5' })
   const cats = form.type === 'in' ? incomeCats : expenseCats
   const save = async () => {
@@ -501,12 +511,12 @@ function Recorrencias({ userId, recurrences, launches, month, reload, show, expe
     <button className="btn mt-4" onClick={save}><Plus size={17} /> Criar recorrência</button>
     {recurrences.length > 0 && <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--border)' }}>{recurrences.map((r: any) => {
       const launched = isRecurrenceLaunched(launches, r, month)
-      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" aria-label="Apagar recorrência" onClick={async () => { if (!confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
+      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" aria-label="Apagar recorrência" onClick={async () => { if (!await confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
     })}</div>}
   </section>
 }
 
-function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: any) {
+function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: { userId: string; bills: FixedBill[]; bsum: any; month: string; reload: () => Promise<void>; show: (m: string) => void; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ name: '', amount: '', dueDay: '10' })
   const save = async (name = form.name) => {
@@ -535,14 +545,14 @@ function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: any
           <div className="flex-1"><div className={`font-bold ${b.paid ? 'line-through' : ''}`}>{b.name}</div><div className="muted text-xs">Vence dia {b.dueDay}{b.overdue ? ' • venceu!' : b.dueSoon ? ` • vence em ${b.daysToDue} dia(s)` : ''}</div></div>
           <b>{brl(b.amount)}</b>
           <button className="iconbtn" aria-label="Editar conta fixa" onClick={() => edit(b)}><Pencil size={15} /></button>
-          <button className="iconbtn" aria-label="Apagar conta fixa" onClick={async () => { if (!confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Apagar conta fixa" onClick={async () => { if (!await confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
   </div>
 }
 
-function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reload, show, enqueueDelete }: any) {
+function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reload, show, enqueueDelete }: { userId: string; cards: CreditCard[]; purchases: CreditCardPurchase[]; payments: CreditCardPayment[]; month: string; expenseCats: string[]; reload: () => Promise<void>; show: (m: string) => void; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [selectedId, setSelectedId] = useState('')
   const [cardForm, setCardForm] = useState<any>({ name: '', brand: '', limit: '', closingDay: '5', dueDay: '12', color: '#0E9F6E' })
   const [editingCard, setEditingCard] = useState<string | null>(null)
@@ -560,7 +570,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
   }
   const editCard = (c: any) => { setEditingCard(c.id); setCardForm({ name: c.name, brand: c.brand || '', limit: String(c.limitAmount).replace('.', ','), closingDay: String(c.closingDay), dueDay: String(c.dueDay), color: cardColor(c) }) }
   const removeCard = async (c: any) => {
-    if (!confirm(`Apagar o cartão ${c.name} e suas compras?`)) return
+    if (!await confirm(`Apagar o cartão ${c.name} e suas compras?`)) return
     try {
       for (const p of purchases.filter((x: any) => x.cardId === c.id)) enqueueDelete('credit_card_purchases', p)
       enqueueDelete('credit_cards', c)
@@ -616,7 +626,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
             <div className="tx-icon out"><CreditCardIcon size={15} /></div>
             <div className="flex-1 min-w-0"><div className="font-bold truncate">{it.purchase.description}</div><div className="muted text-xs">{it.purchase.category} • parcela {it.installment.number}/{it.purchase.installments} • compra em {new Date(it.purchase.firstDate + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
             <b className="shrink-0">{brl(it.installment.amount)}</b>
-            <button className="iconbtn" aria-label="Apagar compra" onClick={async () => { if (!confirm('Apagar esta compra e todas as parcelas?')) return; try { await deleteCreditCardPurchase(it.purchase.id, userId); enqueueDelete('credit_card_purchases', it.purchase); await reload() } catch (e: any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={14} /></button>
+            <button className="iconbtn" aria-label="Apagar compra" onClick={async () => { if (!await confirm('Apagar esta compra e todas as parcelas?')) return; try { await deleteCreditCardPurchase(it.purchase.id, userId); enqueueDelete('credit_card_purchases', it.purchase); await reload() } catch (e: any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={14} /></button>
           </div>) : <p className="muted text-sm">Nenhuma compra nesta fatura.</p>}
         </div>
         <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
@@ -637,7 +647,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
   </div>
 }
 
-function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }: any) {
+function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }: { userId: string; goals: Goal[]; reload: () => Promise<void>; show: (m: string) => void; isPro: boolean; requirePro: () => boolean; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ name: '', target: '', saved: '', deadline: '', autoMonthly: '' })
   const [add, setAdd] = useState<Record<string, string>>({})
@@ -673,7 +683,7 @@ function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }
             <input className="input" placeholder="Adicionar R$" value={add[g.id] || ''} onChange={e => setAdd({ ...add, [g.id]: e.target.value })} inputMode="decimal" />
             <button className="btn" onClick={async () => { const v = num(add[g.id] || ''); if (!v) return show('Informe um valor'); try { await upsertGoal({ ...g, userId, saved: g.saved + v }); await reload(); setAdd({ ...add, [g.id]: '' }); show('Valor adicionado. Continue assim!') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') } }}>Guardar</button>
             <button className="iconbtn" aria-label="Editar meta" onClick={() => edit(g)}><Pencil size={15} /></button>
-            <button className="iconbtn" aria-label="Apagar meta" onClick={async () => { if (!confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+            <button className="iconbtn" aria-label="Apagar meta" onClick={async () => { if (!await confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
           </div>
         </div>
       ))}
@@ -691,7 +701,7 @@ function BudgetRow({ cat, budget, reload, show, userId }: any) {
   </div>
 }
 
-function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCats, reload, show, goals, isPro, requirePro }: any) {
+function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCats, reload, show, goals, isPro, requirePro }: { userId: string; s: any; history: any; tx: Transaction[]; month: string; budgets: Budget[]; bstatus: any; fc: any; expenseCats: string[]; reload: () => Promise<void>; show: (m: string) => void; goals: Goal[]; isPro: boolean; requirePro: () => boolean }) {
   const [view, setView] = useState<'mes' | 'ano'>('mes')
   const bmap = Object.fromEntries(budgets.map((b: any) => [b.category, b]))
   if (view === 'ano') return <div className="space-y-5"><div className="segment"><button data-active={false} onClick={() => setView('mes')}>Do mês</button><button data-active="true" onClick={() => setView('ano')}>Ano todo</button></div><AnnualView tx={tx} isPro={isPro} requirePro={requirePro} show={show} /></div>
@@ -852,7 +862,7 @@ function ResetPasswordScreen({ auth }: any) {
     <button className="btn w-full" onClick={async () => { const r = await auth.updatePassword(password); setMsg(r.error || 'Senha atualizada!'); if (!r.error) window.location.hash = '' }}>Salvar nova senha</button>
   </div></div>
 }
-function Investimentos({ userId, investments, allTx, reload, show }: any) {
+function Investimentos({ userId, investments, allTx, reload, show }: { userId: string; investments: Investment[]; allTx: InvestmentTransaction[]; reload: () => Promise<void>; show: (m: string) => void }) {
   const [form, setForm] = useState<any>({ name: '', category: 'Renda fixa', ticker: '', institution: '', quantity: '', averagePrice: '', investedAmount: '', currentValue: '', startedAt: today(), notes: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -895,7 +905,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
   }
   const editTx = (t: any) => { setEditingTxId(t.id); setTxForm({ type: t.type, date: t.date, amount: String(t.amount).replace('.', ','), quantity: String(t.quantity).replace('.', ','), unitPrice: String(t.unitPrice).replace('.', ','), description: t.description }) }
   const removeTx = async (t: any) => {
-    if (!selected || !confirm('Excluir esta movimentação? O investimento será recalculado.')) return
+    if (!selected || !await confirm('Excluir esta movimentação? O investimento será recalculado.')) return
     const updated = reverseTransaction(selected, t)
     try { await deleteInvestmentTransaction(t.id, userId, updated); if (editingTxId === t.id) setEditingTxId(null); await reload(); show('Movimentação excluída') } catch (e: any) { show(e?.message || 'Não foi possível excluir') }
   }
@@ -946,7 +956,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
           <div className="text-right"><b>{brl(inv.currentValue)}</b><div className={`text-xs font-bold ${g.gain >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{g.gain >= 0 ? '+' : ''}{brl(g.gain)} ({g.pct}%)</div></div>
           <button className="btn-ghost" onClick={() => setSelectedId(inv.id)}>Detalhes</button>
           <button className="iconbtn" aria-label="Editar investimento" onClick={() => edit(inv)}><Pencil size={15} /></button>
-          <button className="iconbtn" aria-label="Excluir investimento" onClick={async () => { if (!confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Excluir investimento" onClick={async () => { if (!await confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>) })}
     </section>
     {selected && <section className="card p-5 md:p-6 space-y-4">
@@ -977,7 +987,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: any) {
   </div>
 }
 
-function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConfigured, reload, show }: any) {
+function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConfigured, reload, show }: { pro: any; checkout: string; checkoutConfigured: boolean; licenseApi: string; licenseApiConfigured: boolean; reload: () => Promise<void>; show: (m: string) => void }) {
   const [key, setKey] = useState(''); const [msg, setMsg] = useState('')
   const [email, setEmail] = useState(''); const [checking, setChecking] = useState(false)
   useEffect(() => { getSetting('caktoEmail').then(v => { if (v) setEmail(v) }) }, [])
@@ -1071,7 +1081,7 @@ function describeRow(r: any) {
   return r.description || r.name || r.category || r.month || r.id || '—'
 }
 
-function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSync, checkout }: any) {
+function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSync, checkout }: { auth: any; name: string; setName: (v: string) => void; show: (m: string) => void; isPro: boolean; pro: any; goPro: () => void; syncState: any; runSync: () => Promise<void>; checkout: string }) {
   const user = auth.user
   const [draft, setDraft] = useState(name || '')
   useEffect(() => { setDraft(name || '') }, [name])
@@ -1163,7 +1173,7 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
         <div className="text-sm break-all">E-mail: <b>{email}</b></div>
         <div className="text-sm muted">{syncText}</div>
         <div className="flex gap-2 flex-wrap"><button className="btn-ghost" onClick={runSync}>Sincronizar agora</button><button className="btn-ghost" onClick={async () => { await auth.signOut(); window.location.reload() }}><LogOut size={15} /> Sair da conta</button></div>
-        <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
+        <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirm('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
         <p className="muted text-xs">A exclusão apaga seus dados na nuvem. Os dados locais deste aparelho continuam até você apagá-los em Ajustes → Zona de perigo.</p>
       </> : <p className="muted text-sm">Sem conta conectada: o NoAzul está em <b>modo local</b> e seus dados ficam só neste aparelho. Configure o Supabase para sincronizar entre dispositivos.</p>}
     </section>
@@ -1176,7 +1186,7 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
   </div>
 }
 
-function Config({ userId, dark, setDark, categories, bills, payments, tx, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, goPerfil, pro, enqueueDelete }: any) {
+function Config({ userId, dark, setDark, categories, bills, payments, tx, reload, show, isPro, accent, setAccent, requirePro, checkoutUrl, setCheckoutUrl, licenseApiUrl, setLicenseApiUrl, goPro, goPerfil, pro, enqueueDelete }: { userId: string; dark: boolean; setDark: (v: boolean) => void; categories: string[]; bills: FixedBill[]; payments: BillPayment[]; tx: Transaction[]; reload: () => Promise<void>; show: (m: string) => void; isPro: boolean; accent: string; setAccent: (v: string) => void; requirePro: () => boolean; checkoutUrl: string; setCheckoutUrl: (v: string) => void; licenseApiUrl: string; setLicenseApiUrl: (v: string) => void; goPro: () => void; goPerfil: () => void; pro: any; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [catName, setCatName] = useState(''); const [catType, setCatType] = useState<'in' | 'out'>('out')
   const [reminders, setReminders] = useState<ReminderSettings>({ enabled: false, daysBefore: 3, hour: 9 })
   const [permission, setPermission] = useState<string>(notificationPermission())
@@ -1211,7 +1221,7 @@ function Config({ userId, dark, setDark, categories, bills, payments, tx, reload
         <select className="input !w-auto" value={catType} onChange={e => setCatType(e.target.value as any)}><option value="out">Saída</option><option value="in">Entrada</option></select>
         <button className="btn" onClick={async () => { if (!catName.trim()) return show('Informe o nome da categoria'); try { await addCategory(catName.trim(), catType, userId); await reload(); setCatName(''); show('Categoria criada') } catch (e:any) { show(e?.message || 'Não foi possível salvar.') } }}><Plus size={16} /> Criar</button>
       </div>
-      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!confirm(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
+      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!await confirm(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
     </section>
     <section className="card p-6 space-y-4">
       <h2 className="font-bold">Lembretes de contas</h2>
@@ -1241,7 +1251,7 @@ function Config({ userId, dark, setDark, categories, bills, payments, tx, reload
     <section className="card p-6 space-y-3" style={{ borderColor: '#FECDD3' }}>
       <h2 className="font-bold text-rose-600">Zona de perigo</h2>
       <p className="muted text-sm">Apaga todos os movimentos, contas, metas, limites e recorrências deste aparelho. Não tem como desfazer.</p>
-      <button className="btn-ghost text-rose-600" onClick={async () => { if (!confirm('Tem certeza? Todos os seus dados serão apagados.')) return; if (!confirm('Última chance: apagar tudo mesmo?')) return; try { await clearAllData(userId); await reload(); show('Todos os dados foram apagados') } catch (e:any) { show(e?.message || 'Não foi possível apagar.') } }}><Trash2 size={15} /> Apagar todos os meus dados</button>
+      <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirm('Tem certeza? Todos os seus dados serão apagados.')) return; if (!await confirm('Última chance: apagar tudo mesmo?')) return; try { await clearAllData(userId); await reload(); show('Todos os dados foram apagados') } catch (e:any) { show(e?.message || 'Não foi possível apagar.') } }}><Trash2 size={15} /> Apagar todos os meus dados</button>
     </section>
     <section className="card p-6">
       <div className="font-bold text-sm">Sobre o NoAzul</div>
