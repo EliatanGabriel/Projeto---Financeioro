@@ -33,7 +33,7 @@ const FIELDS: Record<SyncEntity, string[]> = {
 const NUMERIC = new Set(['amount', 'target', 'saved', 'autoMonthly', 'limit', 'quantity', 'averagePrice', 'investedAmount', 'currentValue', 'unitPrice', 'costRemoved', 'realizedGain', 'dueDay', 'day', 'limitAmount', 'closingDay', 'totalAmount', 'installments'])
 
 /** Entidades cuja PK na nuvem é composta (não têm `id`). O motor usa uma chave natural estável. */
-const NATURAL = new Set<SyncEntity>(['budgets', 'categories', 'bill_payments', 'recurrence_launches', 'goal_auto_launches', 'credit_card_payments'])
+export const NATURAL = new Set<SyncEntity>(['budgets', 'categories', 'bill_payments', 'recurrence_launches', 'goal_auto_launches', 'credit_card_payments'])
 export const HAS_UPDATED_AT = new Set<SyncEntity>(['transactions', 'fixed_bills', 'goals', 'recurrences', 'investments', 'investment_transactions', 'credit_cards', 'credit_card_purchases'])
 
 export function stableId(entity: SyncEntity, row: any): string {

@@ -6,7 +6,7 @@ import { fromRemoteRow, HAS_UPDATED_AT, toRemoteRow, NATURAL } from './mapping'
 export function supabaseSyncClient(userId: string) {
   if (!supabase) throw new Error('Supabase não configurado')
   const sb = supabase as NonNullable<typeof supabase>
-  const pkColumns = {
+  const pkColumns: Partial<Record<SyncEntity, string[]>> = {
     budgets: ['user_id', 'category'],
     categories: ['user_id', 'name', 'type'],
     bill_payments: ['user_id', 'bill_id', 'month'],

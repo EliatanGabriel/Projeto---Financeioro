@@ -2,10 +2,10 @@
 let initSqlJs: any = null
 import type {Product,Marketplace,Transaction,FixedBill,Goal,Budget,BillPayment,Recurrence,Category,Investment,InvestmentTransaction,CreditCard,CreditCardPurchase,CreditCardPayment} from '../types'
 import {newId,todayISO} from '../utils/format'
-let sql:any=null; let DB:Database|null=null; const KEY='precifica.db.base64'
+let sql:any=null; let DB:any=null; const KEY='precifica.db.base64'
 async function init(){
  if(DB) return DB
- if(!initSqlJs) { const mod = await import('sql.js'); initSqlJs = mod.default; DatabaseType = mod.Database }
+ if(!initSqlJs) { const mod = await import('sql.js'); initSqlJs = mod.default }
  sql=await initSqlJs({locateFile:()=>'/sql-wasm-browser.wasm'})
  const saved=localStorage.getItem(KEY)
  if(saved){ const bin=Uint8Array.from(atob(saved),c=>c.charCodeAt(0)); DB=new sql.Database(bin) }
@@ -104,7 +104,7 @@ function migrate(){
 }
 function b64(bytes:Uint8Array){ let s=''; for(let i=0;i<bytes.length;i+=8192) s+=String.fromCharCode(...bytes.subarray(i,i+8192)); return btoa(s) }
 let persistTimer: ReturnType<typeof setTimeout> | null = null
-function persistNow(){ try { if(DB) localStorage.setItem(KEY,b64(DB.export())) } catch (e) { if(e.name==='QuotaExceededError') console.warn('LocalStorage quota excedida - sincronização de banco desativada') } }
+function persistNow(){ try { if(DB) localStorage.setItem(KEY,b64(DB.export())) } catch (e: any) { if(e?.name==='QuotaExceededError') console.warn('LocalStorage quota excedida - sincronização de banco desativada') } }
 function persist(){ if(persistTimer||!DB) return; persistTimer=setTimeout(()=>{ persistTimer=null; persistNow() },250) }
 export function flushPersist(){ if(persistTimer){ clearTimeout(persistTimer); persistTimer=null } persistNow() }
 if(typeof window!=='undefined'){
