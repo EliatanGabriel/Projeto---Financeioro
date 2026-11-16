@@ -7,7 +7,12 @@ import { getLicenseApiUrl, isLicenseApiConfigured } from '../config/plans'
 class FakeKV {
   m = new Map<string, string>()
   async get(k: string) { return this.m.get(k) ?? null }
-  async put(k: string, v: string) { this.m.set(k, v) }
+  async put(k: string, v: string) {
+    // Retrodata chaves de rate limit: os testes chamam /license repetido no mesmo e-mail,
+    // e o limite de 60 s (comportamento de produção) atrapalharia os cenários testados aqui.
+    if (k.startsWith('license_rate:') || k.startsWith('portal_status_rate:')) v = String(Date.now() - 120000)
+    this.m.set(k, v)
+  }
   async list(opts: any = {}) {
     const prefix = opts.prefix || ''
     const keys = [...this.m.keys()].filter(k => k.startsWith(prefix)).sort().map(name => ({ name }))

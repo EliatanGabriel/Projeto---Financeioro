@@ -154,3 +154,34 @@ export function monthlyHistory(transactions: Transaction[], months = 6, ref = ne
   }
   return out
 }
+/** Comparação do mês escolhido com o mês anterior (entradas e saídas, em %). */
+export function monthComparison(transactions: Transaction[], month: string) {
+  const prev = shiftMonth(month, -1)
+  const sum = (m: string, type: 'in' | 'out') => transactions.filter(t => monthKey(t.date) === m && t.type === type).reduce((a, t) => a + t.amount, 0)
+  const curIn = sum(month, 'in'); const curOut = sum(month, 'out')
+  const prevIn = sum(prev, 'in'); const prevOut = sum(prev, 'out')
+  const pct = (cur: number, before: number) => before > 0 ? Math.round(((cur - before) / before) * 100) : null
+  return {
+    prevMonth: prev,
+    hasPrev: transactions.some(t => monthKey(t.date) === prev),
+    income: curIn, prevIncome: prevIn, incomePct: pct(curIn, prevIn),
+    expense: curOut, prevExpense: prevOut, expensePct: pct(curOut, prevOut),
+  }
+}
+/** Categorias de saída deste mês que subiram bem acima da média dos 3 meses anteriores. */
+export function spendingSpikes(transactions: Transaction[], month: string, minAvg = 50, minPct = 30) {
+  const prevKeys = [1, 2, 3].map(i => shiftMonth(month, -i))
+  const sumByCat: Record<string, number> = {}
+  for (const k of prevKeys) {
+    for (const t of transactions.filter(t => monthKey(t.date) === k && t.type === 'out')) sumByCat[t.category] = (sumByCat[t.category] || 0) + t.amount
+  }
+  const curByCat = transactions.filter(t => monthKey(t.date) === month && t.type === 'out')
+    .reduce<Record<string, number>>((acc, t) => { acc[t.category] = (acc[t.category] || 0) + t.amount; return acc }, {})
+  return Object.entries(curByCat).map(([category, value]) => {
+    const avg = Math.round(((sumByCat[category] || 0) / prevKeys.length) * 100) / 100
+    const pct = avg > 0 ? Math.round(((value - avg) / avg) * 100) : null
+    return { category, current: Math.round(value * 100) / 100, avg, pct, diff: Math.round((value - avg) * 100) / 100 }
+  })
+    .filter(x => x.avg >= minAvg && x.pct !== null && x.pct >= minPct)
+    .sort((a, b) => (b.pct || 0) - (a.pct || 0))
+}

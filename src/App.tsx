@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, CreditCard as CreditCardIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings as SettingsIcon, CreditCard as CreditCardIcon, Plus, Trash2, Sun, Moon, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Lightbulb, Download, Upload, Search, Pencil, Check, CalendarClock, FileText, AlertTriangle, ListChecks, Crown, Lock, X, CalendarDays, Sparkles, ExternalLink, UserRound, Mail, LogOut, KeyRound, ShieldCheck, Smartphone } from 'lucide-react'
 import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup, resolveSyncConflict, listCreditCards, upsertCreditCard, deleteCreditCard, listCreditCardPurchases, upsertCreditCardPurchase, deleteCreditCardPurchase, listCreditCardPayments, setCreditCardPaid } from './database/db'
 import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
 import { cardSummary, cardColor } from './calculations/creditCards'
-import { brl, newId, num } from './utils/format'
+import { brl, newId, num, categoryColor } from './utils/format'
 import { parseReminderSettings, dueBills, reminderMessage, reminderFingerprint, requestNotifications, showReminderNotification, notificationPermission } from './utils/reminders'
 import type { ReminderSettings } from './utils/reminders'
 import { parseOfx, looksLikeOfx } from './utils/ofx'
 import { exportCSV, exportPDFReport, exportXLSX } from './utils/reports'
-import { summarize, monthlyHistory, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
+import { summarize, monthlyHistory, monthComparison, spendingSpikes, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
 import { annualSummary, compareAnnual, financialScore, spendingTrend, proInsights } from './calculations/annual'
 import { PRO_PRICE_BRL, PRO_FEATURES, FREE_FEATURES, FREE_LIMITS, getCheckoutUrl, isCheckoutConfigured, getLicenseApiUrl, isLicenseApiConfigured } from './config/plans'
 import { verifyLicense, getDeviceId, isProActive, proDaysLeft, fetchAutoLicense } from './licensing/licensing'
 import { useAuth } from './auth/useAuth'
+import { confirmDialog, ConfirmHost } from './components/confirm'
 import { SYNC_ENTITIES, canonicalHash, resolveConflict } from './sync/engine'
 import { legacyCounts, reassignLegacyUser } from './database/db'
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Legend } from 'recharts'
@@ -27,7 +28,6 @@ const ACCENTS: Record<string, { label: string; brand: string; dark: string }> = 
 }
 const today = () => new Date().toISOString().slice(0, 10)
 const GREEN = '#0E9F6E', ROSE = '#E11D63'
-const PIE_COLORS = ['#0E9F6E','#0F766E','#14B8A6','#F59E0B','#F97316','#8B5CF6','#EC4899','#64748B','#06B6D4','#84CC16']
 
 async function currentPro(): Promise<boolean> {
   const key = await getSetting('licenseKey'); if (!key) return false
@@ -89,7 +89,6 @@ export default function App() {
   const [licenseApiUrl, setLicenseApiUrl] = useState('')
   const [showUpsell, setShowUpsell] = useState(false)
   const [userId, setUserId] = useState('')
-  ;(async () => { await setSetting('recurrenceAutoLaunch', 'true') })()
   const [investments, setInvestments] = useState<Investment[]>([])
   const [invTx, setInvTx] = useState<InvestmentTransaction[]>([])
   const [cards, setCards] = useState<CreditCard[]>([])
@@ -189,16 +188,29 @@ export default function App() {
     return () => { cancelled = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [bills, payments])
   useEffect(() => { const a = ACCENTS[accent] || ACCENTS.esmeralda; document.documentElement.style.setProperty('--brand', a.brand); document.documentElement.style.setProperty('--brand-dark', a.dark) }, [accent])
+  useEffect(() => { (async () => { try { if (!(await getSetting('recurrenceAutoLaunch'))) await setSetting('recurrenceAutoLaunch', 'true') } catch {} })() }, [])
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('noazul-pwa-dismissed') === '1' || window.matchMedia('(display-mode: standalone)').matches) return
+      const isIOS = /iphone|ipad/i.test(navigator.userAgent) && !((window as any).navigator.standalone)
+      if (isIOS) setInstallHint(true)
+    } catch {}
+    const onPrompt = (e: any) => { e.preventDefault(); setInstallEvt(e); setInstallHint(true) }
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', onPrompt)
+  }, [])
+  const [installEvt, setInstallEvt] = useState<any>(null)
+  const [installHint, setInstallHint] = useState(false)
   const isPro = !!pro.activated
   const requirePro = () => { if (isPro) return true; setShowUpsell(true); return false }
   const checkout = getCheckoutUrl(checkoutUrl)
   const licenseApi = getLicenseApiUrl(licenseApiUrl)
-  let toastTimer: ReturnType<typeof setTimeout> | null = null
-const show = (m: string) => { 
-  if (toastTimer) clearTimeout(toastTimer) 
-  setToast(m) 
-  toastTimer = setTimeout(() => setToast(''), 2600) 
-}
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const show = (m: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast(m)
+    toastTimer.current = setTimeout(() => setToast(''), 2600)
+  }
 
   const s = useMemo(() => summarize(tx, bills, month), [tx, bills, month])
   const history = useMemo(() => monthlyHistory(tx, 6), [tx])
@@ -220,6 +232,35 @@ const show = (m: string) => {
     return { total, paidCount, count: bsum.items.length, pct: total > 0 ? Math.round((bsum.paidTotal / total) * 100) : 0 }
   }, [bsum])
   const steps = useMemo(() => onboardingSteps(tx, bills, goals, budgets), [tx, bills, goals, budgets])
+  const cmpMonth = useMemo(() => monthComparison(tx, month), [tx, month])
+  const cardInvoiceTotal = useMemo(() => cards.reduce((a: any, c: any) => a + cardSummary(c, cardPurchases, cardPayments, month).invoice.total, 0), [cards, cardPurchases, cardPayments, month])
+  const hasSamples = tx.some((t: any) => (t.description || '').endsWith('(exemplo)')) || bills.some((b: any) => (b.name || '').endsWith('(exemplo)')) || goals.some((g: any) => (g.name || '').endsWith('(exemplo)'))
+  const loadSamples = async () => {
+    if (!uid) return
+    try {
+      const monthsAgo = (n: number) => { const d = new Date(); d.setMonth(d.getMonth() - n); return d.toISOString().slice(0, 10) }
+      const now = new Date().toISOString()
+      const samples: Array<[string, number, 'in' | 'out', string, number]> = [
+        ['Salário (exemplo)', 3500, 'in', 'Salário', 0], ['Salário (exemplo)', 3500, 'in', 'Salário', 1], ['Freelance (exemplo)', 500, 'in', 'Trabalho extra', 1],
+        ['Supermercado (exemplo)', 480, 'out', 'Alimentação', 0], ['Ônibus (exemplo)', 120, 'out', 'Transporte', 0], ['Cinema (exemplo)', 60, 'out', 'Lazer', 0],
+        ['Internet (exemplo)', 100, 'out', 'Contas da casa', 0], ['Farmácia (exemplo)', 85, 'out', 'Saúde', 1], ['Mercado do mês (exemplo)', 390, 'out', 'Alimentação', 1],
+      ]
+      for (const [description, amount, type, category, ago] of samples) await addTransaction({ id: newId(), userId: uid, description, amount, type, category, date: monthsAgo(ago), createdAt: now })
+      await upsertFixedBill({ id: newId(), userId: uid, name: 'Aluguel (exemplo)', amount: 900, dueDay: 5, category: 'Contas da casa', createdAt: now })
+      await upsertFixedBill({ id: newId(), userId: uid, name: 'Energia (exemplo)', amount: 130, dueDay: 10, category: 'Contas da casa', createdAt: now })
+      await upsertGoal({ id: newId(), userId: uid, name: 'Reserva de emergência (exemplo)', target: 6000, saved: 1200, deadline: '', autoMonthly: 0, createdAt: now })
+      await setBudget('Alimentação', 600, uid)
+      await reload(); show('Dados de exemplo carregados — explore à vontade!')
+    } catch (e: any) { show(e?.message || 'Não foi possível criar os exemplos.') }
+  }
+  const removeSamples = async () => {
+    try {
+      for (const t of tx.filter((t: any) => (t.description || '').endsWith('(exemplo)'))) await deleteTransaction(t.id, uid)
+      for (const b of bills.filter((b: any) => (b.name || '').endsWith('(exemplo)'))) await deleteFixedBill(b.id, uid)
+      for (const g of goals.filter((g: any) => (g.name || '').endsWith('(exemplo)'))) await deleteGoal(g.id, uid)
+      await reload(); show('Dados de exemplo removidos')
+    } catch (e: any) { show(e?.message || 'Não foi possível remover os exemplos.') }
+  }
   const expenseCats = categories.filter(c => c.type === 'out').map(c => c.name).length ? categories.filter(c => c.type === 'out').map(c => c.name) : [...EXPENSE_CATEGORIES]
   const incomeCats = categories.filter(c => c.type === 'in').map(c => c.name).length ? categories.filter(c => c.type === 'in').map(c => c.name) : [...INCOME_CATEGORIES]
   const alerts = [...bstatus.filter(b => b.status === 'estourou').map(b => `Você passou do limite em ${b.category}: gastou ${brl(b.spent)} de ${brl(b.limit)}.`), ...bsum.overdue.map(b => `${b.name} venceu no dia ${b.dueDay} e ainda não foi marcada como paga.`)]
@@ -234,6 +275,7 @@ const show = (m: string) => {
   if (authConfigured && !auth.loading && !authUser) return <AuthScreen auth={auth} />
   return (
     <div className="min-h-screen">
+      <ConfirmHost />
       {migration && authUser && <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"><div className="card p-6 max-w-md w-full space-y-4"><div className="font-extrabold text-lg">Importar dados deste aparelho?</div><p className="muted text-sm leading-relaxed">Encontramos <b>{migration.legacyTotal} registro(s)</b> antigos neste aparelho. Importar associa tudo à sua conta e envia para a nuvem. Nada é apagado antes da confirmação.{migration.ambiguous > 0 && <><br /><br />Atenção: há <b>{migration.ambiguous} registro(s) com identidade ambígua</b> — a importação será interrompida para revisão manual.</>}</p><div className="flex gap-2"><button className="btn" disabled={migration.ambiguous > 0} onClick={async () => { try { const moved = await reassignLegacyUser(getDeviceId(), authUser.id); if (moved > 0) { await runSync(); show('Dados importados') } setMigration(null); await reload() } catch (e: any) { show(e.message) } }}>Importar e sincronizar</button><button className="btn-ghost" onClick={() => setMigration(null)}>Agora não</button></div></div></div>}
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-64 flex-col p-5 gap-1 z-20 sidebar">
         <Logo />
@@ -269,10 +311,20 @@ const show = (m: string) => {
         <main className="max-w-5xl mx-auto px-4 md:px-7 pb-28 md:pb-10 pt-2">
           {tab === 'inicio' && (
             <div className="space-y-5">
+              {installHint && (
+                <section className="card p-4 flex items-center gap-3">
+                  <Smartphone size={20} className="text-emerald-600 shrink-0" />
+                  <div className="text-sm flex-1 min-w-0"><b>Instale o NoAzul no seu aparelho</b><div className="muted text-xs">{installEvt ? 'Abra na tela inicial como um app de verdade — e continue funcionando sem internet.' : 'No iPhone: toque em Compartilhar e depois em “Adicionar à Tela de Início”.'}</div></div>
+                  {installEvt && <button className="btn shrink-0" onClick={async () => { try { installEvt.prompt(); const r = await installEvt.userChoice; if (r?.outcome === 'accepted') { setInstallHint(false); show('NoAzul instalado!') } } catch {} setInstallEvt(null) }}>Instalar</button>}
+                  <button className="iconbtn shrink-0" aria-label="Dispensar" onClick={() => { setInstallHint(false); try { localStorage.setItem('noazul-pwa-dismissed', '1') } catch {} }}><X size={15} /></button>
+                </section>
+              )}
               <section className="hero">
                 <div className="muted text-sm font-semibold">Sobrou neste mês</div>
                 <div className="hero-value">{brl(s.balance)}</div>
                 <p className="text-sm opacity-90 mt-1">Entrou {brl(s.income)} • Saiu {brl(s.expense)} • Saldo total desde o começo: <b>{brl(overall)}</b></p>
+                {cmpMonth.hasPrev && <p className="text-xs opacity-90 mt-1">Comparado ao mês anterior: entrou {cmpMonth.incomePct === null ? '—' : (cmpMonth.incomePct >= 0 ? '+' : '') + cmpMonth.incomePct + '%'} • saiu {cmpMonth.expensePct === null ? '—' : (cmpMonth.expensePct >= 0 ? '+' : '') + cmpMonth.expensePct + '%'}</p>}
+                {cardInvoiceTotal > 0 && <div className="hero-chip">Fatura prevista dos cartões: <b>{brl(cardInvoiceTotal)}</b>{cards.length > 1 ? ` (${cards.length} cartões)` : ''} — vale deixar esse valor de lado.</div>}
                 {s.afterBills > 0 ? <div className="hero-chip">Você pode gastar cerca de <b>{brl(s.dailyAllowance)} por dia</b> até o fim do mês, sem estourar.</div>
                   : s.balance > 0 ? <div className="hero-chip">Descontando as contas fixas, fica apertado — vale segurar um pouco.</div>
                   : <div className="hero-chip">Adicione o que entrou este mês para ver quanto sobra.</div>}
@@ -286,6 +338,21 @@ const show = (m: string) => {
                 </section>
               ) : (
                 <section className="card p-4 flex items-center gap-3"><Crown size={20} className="text-amber-500" /><div className="text-sm"><b>Pro ativo</b> até {pro.expiresAt ? new Date(pro.expiresAt).toLocaleDateString('pt-BR') : '—'} • {proDaysLeft(pro)} dia(s) restantes. Obrigado!</div><button className="link ml-auto shrink-0" onClick={() => setTab('pro')}>Ver</button></section>
+              )}
+
+              {(!tx.length && !bills.length && !goals.length) && (
+                <section className="card p-5 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  <Sparkles size={20} className="text-violet-500 shrink-0" />
+                  <div className="text-sm flex-1"><b>Quer ver como funciona?</b><div className="muted text-xs">Carregue dados de exemplo (salário, mercado, contas, meta...) para explorar o app. Remover depois leva um clique.</div></div>
+                  <button className="btn shrink-0" onClick={loadSamples}>Carregar exemplos</button>
+                </section>
+              )}
+              {hasSamples && (
+                <section className="card p-4 flex items-center gap-3">
+                  <Sparkles size={18} className="text-violet-500 shrink-0" />
+                  <div className="text-sm flex-1 muted">Você está vendo <b>dados de exemplo</b> — itens marcados com “(exemplo)”.</div>
+                  <button className="btn-ghost shrink-0" onClick={removeSamples}>Remover exemplos</button>
+                </section>
               )}
 
               {steps.some(x => !x.done) && (
@@ -357,8 +424,8 @@ const show = (m: string) => {
                   <h2 className="font-bold mb-3">Para onde foi seu dinheiro?</h2>
                   {s.byCategory.length ? (
                     <div className="flex items-center gap-4">
-                      <div style={{ height: 200, flex: 1 }}><ResponsiveContainer><PieChart><Pie data={s.byCategory} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={3}>{s.byCategory.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip formatter={(v: any) => brl(v)} /></PieChart></ResponsiveContainer></div>
-                      <ul className="text-sm space-y-2 min-w-[130px]">{s.byCategory.slice(0, 5).map((c, i) => <li key={c.name} className="flex justify-between gap-3"><span className="flex items-center gap-2"><span className="swatch" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />{c.name}</span><b>{brl(c.value)}</b></li>)}</ul>
+                      <div style={{ height: 200, flex: 1 }}><ResponsiveContainer><PieChart><Pie data={s.byCategory} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={3}>{s.byCategory.map((c: any) => <Cell key={c.name} fill={categoryColor(c.name)} />)}</Pie><Tooltip formatter={(v: any) => brl(v)} /></PieChart></ResponsiveContainer></div>
+                      <ul className="text-sm space-y-2 min-w-[130px]">{s.byCategory.slice(0, 5).map((c: any) => <li key={c.name} className="flex justify-between gap-3"><span className="flex items-center gap-2"><span className="swatch" style={{ background: categoryColor(c.name) }} />{c.name}</span><b>{brl(c.value)}</b></li>)}</ul>
                     </div>
                   ) : <Empty text="Nenhuma saída neste mês ainda." action={() => setTab('movimentos')} />}
                 </section>
@@ -430,17 +497,35 @@ function Logo() { return <div className="flex items-center gap-3 px-1 py-2"><div
 function Stat({ icon, label, value, tone }: { icon: any; label: string; value: string; tone: string }) { return <div className="card p-5"><div className={`stat-icon ${tone}`}>{icon}</div><div className="muted text-xs font-bold uppercase mt-3">{label}</div><div className="text-2xl font-extrabold mt-1">{value}</div></div> }
 function Empty({ text, action }: { text: string; action?: () => void }) { return <div className="empty"><p className="muted text-sm">{text}</p>{action && <button className="btn mt-3" onClick={action}><Plus size={16} /> Adicionar</button>}</div> }
 function Field({ label, value, onChange, placeholder, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) { return <label className="block"><div className="label">{label}</div><input className="input" type={type || 'text'} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} /></label> }
-function GoalBar({ g }: { g: Goal }) { const p = goalProgress(g); return <div><div className="flex justify-between text-sm"><b>{g.name}</b><span className="muted">{brl(g.saved)} de {brl(g.target)}</span></div><div className="progress"><div style={{ width: p.pct + '%' }} /></div><div className="muted text-xs mt-1">{p.done ? 'Meta alcançada! Parabéns.' : `${p.pct}% • faltam ${brl(p.remaining)}${p.perMonth ? ` • guardando ${brl(p.perMonth)} por mês você chega lá` : ''}`}</div></div> }
+function GoalBar({ g }: { g: Goal }) {
+  const p = goalProgress(g)
+  const overdue = !p.done && g.deadline && new Date(g.deadline + 'T12:00:00') < new Date()
+  let pace = ''
+  if (!p.done && g.autoMonthly && g.autoMonthly > 0) {
+    const months = Math.max(1, Math.ceil(p.remaining / g.autoMonthly))
+    const eta = monthLabel(shiftMonth(monthKey(new Date()), months))
+    pace = overdue ? ` • no ritmo atual chega em ${eta} — depois do prazo` : ` • no ritmo atual chega em ${eta}`
+  } else if (overdue) pace = ' • o prazo passou — vale revisar a meta'
+  return <div><div className="flex justify-between text-sm"><b>{g.name}</b><span className="muted">{brl(g.saved)} de {brl(g.target)}</span></div><div className="progress"><div style={{ width: p.pct + '%' }} /></div><div className={`text-xs mt-1 ${overdue ? 'text-amber-600' : 'muted'}`}>{p.done ? 'Meta alcançada! Parabéns.' : `${p.pct}% • faltam ${brl(p.remaining)}${p.perMonth ? ` • guardando ${brl(p.perMonth)} por mês você chega no prazo` : ''}${pace}`}</div></div>
+}
 function BudgetBar({ b }: { b: ReturnType<typeof budgetStatus>[number] }) { const col = b.status === 'estourou' ? '#E11D63' : b.status === 'atencao' ? '#F59E0B' : GREEN; return <div><div className="flex justify-between text-sm"><b>{b.category}</b><span className="muted">{brl(b.spent)} de {brl(b.limit)}</span></div><div className="progress"><div style={{ width: Math.min(100, b.pct) + '%', background: col }} /></div><div className="text-xs mt-1" style={{ color: col }}>{b.status === 'estourou' ? `Passou ${brl(-b.remaining)} do limite` : b.status === 'atencao' ? `Faltam ${brl(b.remaining)} do limite` : `Ainda pode gastar ${brl(b.remaining)}`}</div></div> }
 
 function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, recurrences, launches, isPro, requirePro, enqueueDelete }: { userId: string; tx: Transaction[]; month: string; reload: () => Promise<void>; show: (m: string) => void; expenseCats: string[]; incomeCats: string[]; recurrences: Recurrence[]; launches: any[]; isPro: boolean; requirePro: () => boolean; enqueueDelete: (entity: any, row: any) => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<any>({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() })
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all')
+  const [period, setPeriod] = useState<'mes' | '3m' | 'ano' | 'tudo'>('mes')
   const cats = form.type === 'in' ? incomeCats : expenseCats
-  const list = tx.filter((t: any) => monthKey(t.date) === month)
+  const inPeriod = (date: string) => {
+    if (period === 'mes') return monthKey(date) === month
+    if (period === '3m') { const k = monthKey(date); return k === month || k === shiftMonth(month, -1) || k === shiftMonth(month, -2) }
+    if (period === 'ano') return date.slice(0, 4) === month.slice(0, 4)
+    return true
+  }
+  const list = tx.filter((t: any) => inPeriod(t.date))
     .filter((t: any) => filter === 'all' || t.type === filter)
     .filter((t: any) => t.description.toLowerCase().includes(search.toLowerCase()) || t.category.toLowerCase().includes(search.toLowerCase()))
+  const periodLabel = period === 'mes' ? `em ${monthLabel(month)}` : period === '3m' ? 'nos últimos 3 meses' : period === 'ano' ? `em ${month.slice(0, 4)}` : 'no período'
   useEffect(() => { if (!cats.includes(form.category)) setForm((f: any) => ({ ...f, category: cats[0] })) }, [form.type])
   const save = async () => {
     const t: Transaction = { id: editingId || newId(), description: form.description.trim(), amount: num(form.amount), type: form.type, category: form.category, date: form.date, createdAt: new Date().toISOString() }
@@ -469,17 +554,19 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
     <Recorrencias userId={userId} recurrences={recurrences} launches={launches} month={month} reload={reload} show={show} expenseCats={expenseCats} incomeCats={incomeCats} isPro={isPro} requirePro={requirePro} enqueueDelete={enqueueDelete} />
 
     <section className="card p-5">
-      <div className="flex flex-col sm:flex-row gap-2 mb-4">
+      <div className="flex flex-col sm:flex-row gap-2 mb-2">
         <div className="search"><Search size={16} /><input placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} /></div>
         <select className="input sm:!w-auto" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Tudo</option><option value="in">Só entradas</option><option value="out">Só saídas</option></select>
+        <select className="input sm:!w-auto" value={period} onChange={e => setPeriod(e.target.value as any)} aria-label="Período"><option value="mes">Este mês</option><option value="3m">Últimos 3 meses</option><option value="ano">Ano {month.slice(0, 4)}</option><option value="tudo">Todo o período</option></select>
       </div>
-      {!list.length ? <Empty text="Nada por aqui neste mês. Adicione acima quando gastar ou receber." /> : list.map((t: any) => (
+      {list.length > 0 && (() => { const tin = list.filter((t: any) => t.type === 'in').reduce((a: number, t: any) => a + t.amount, 0); const tout = list.filter((t: any) => t.type === 'out').reduce((a: number, t: any) => a + t.amount, 0); return <p className="muted text-xs mb-3">{list.length} lançamento(s) {periodLabel} • entraram <b className="text-emerald-600">{brl(tin)}</b> • saíram <b className="text-rose-600">{brl(tout)}</b></p> })()}
+      {!list.length ? <Empty text={`Nada por aqui ${periodLabel}. Adicione acima quando gastar ou receber.`} /> : list.map((t: any) => (
         <div key={t.id} className="txrow">
           <div className={`tx-icon ${t.type}`}><TrendingUp size={16} /></div>
           <div className="flex-1 min-w-0"><div className="font-bold truncate">{t.description}</div><div className="muted text-xs">{t.category} • {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
           <b className={t.type === 'in' ? 'text-emerald-600' : ''}>{t.type === 'in' ? '+' : '−'} {brl(t.amount)}</b>
           <button className="iconbtn" onClick={() => edit(t)} aria-label="Editar"><Pencil size={15} /></button>
-          <button className="iconbtn" onClick={async () => { if (!await confirm('Apagar este lançamento?')) return; try { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar"><Trash2 size={15} /></button>
+          <button className="iconbtn" onClick={async () => { if (!await confirmDialog('Apagar este lançamento?')) return; try { await deleteTransaction(t.id, userId); enqueueDelete('transactions', t); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar"><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
@@ -511,7 +598,7 @@ function Recorrencias({ userId, recurrences, launches, month, reload, show, expe
     <button className="btn mt-4" onClick={save}><Plus size={17} /> Criar recorrência</button>
     {recurrences.length > 0 && <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--border)' }}>{recurrences.map((r: any) => {
       const launched = isRecurrenceLaunched(launches, r, month)
-      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" aria-label="Apagar recorrência" onClick={async () => { if (!await confirm('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
+      return <div key={r.id} className="txrow"><div className={`tx-icon ${r.type}`}><CalendarClock size={16} /></div><div className="flex-1"><div className="font-bold">{r.description}</div><div className="muted text-xs">Dia {r.day} • {r.category} • {launched ? 'já entrou em ' + monthLabel(month) : 'pendente em ' + monthLabel(month)}</div></div><b>{brl(r.amount)}</b><button className="btn-ghost" disabled={launched} onClick={() => launch(r)}>Lançar</button><button className="iconbtn" aria-label="Apagar recorrência" onClick={async () => { if (!await confirmDialog('Apagar esta recorrência?')) return; try { await deleteRecurrence(r.id, userId); enqueueDelete('recurrences', r); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button></div>
     })}</div>}
   </section>
 }
@@ -545,7 +632,7 @@ function Contas({ userId, bills, bsum, month, reload, show, enqueueDelete }: { u
           <div className="flex-1"><div className={`font-bold ${b.paid ? 'line-through' : ''}`}>{b.name}</div><div className="muted text-xs">Vence dia {b.dueDay}{b.overdue ? ' • venceu!' : b.dueSoon ? ` • vence em ${b.daysToDue} dia(s)` : ''}</div></div>
           <b>{brl(b.amount)}</b>
           <button className="iconbtn" aria-label="Editar conta fixa" onClick={() => edit(b)}><Pencil size={15} /></button>
-          <button className="iconbtn" aria-label="Apagar conta fixa" onClick={async () => { if (!await confirm('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Apagar conta fixa" onClick={async () => { if (!await confirmDialog('Apagar esta conta?')) return; try { await deleteFixedBill(b.id, userId); enqueueDelete('fixed_bills', b); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>
       ))}
     </section>
@@ -570,7 +657,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
   }
   const editCard = (c: any) => { setEditingCard(c.id); setCardForm({ name: c.name, brand: c.brand || '', limit: String(c.limitAmount).replace('.', ','), closingDay: String(c.closingDay), dueDay: String(c.dueDay), color: cardColor(c) }) }
   const removeCard = async (c: any) => {
-    if (!await confirm(`Apagar o cartão ${c.name} e suas compras?`)) return
+    if (!await confirmDialog(`Apagar o cartão ${c.name} e suas compras?`)) return
     try {
       for (const p of purchases.filter((x: any) => x.cardId === c.id)) enqueueDelete('credit_card_purchases', p)
       enqueueDelete('credit_cards', c)
@@ -626,7 +713,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
             <div className="tx-icon out"><CreditCardIcon size={15} /></div>
             <div className="flex-1 min-w-0"><div className="font-bold truncate">{it.purchase.description}</div><div className="muted text-xs">{it.purchase.category} • parcela {it.installment.number}/{it.purchase.installments} • compra em {new Date(it.purchase.firstDate + 'T12:00:00').toLocaleDateString('pt-BR')}</div></div>
             <b className="shrink-0">{brl(it.installment.amount)}</b>
-            <button className="iconbtn" aria-label="Apagar compra" onClick={async () => { if (!await confirm('Apagar esta compra e todas as parcelas?')) return; try { await deleteCreditCardPurchase(it.purchase.id, userId); enqueueDelete('credit_card_purchases', it.purchase); await reload() } catch (e: any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={14} /></button>
+            <button className="iconbtn" aria-label="Apagar compra" onClick={async () => { if (!await confirmDialog('Apagar esta compra e todas as parcelas?')) return; try { await deleteCreditCardPurchase(it.purchase.id, userId); enqueueDelete('credit_card_purchases', it.purchase); await reload() } catch (e: any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={14} /></button>
           </div>) : <p className="muted text-sm">Nenhuma compra nesta fatura.</p>}
         </div>
         <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
@@ -683,7 +770,7 @@ function Metas({ userId, goals, reload, show, isPro, requirePro, enqueueDelete }
             <input className="input" placeholder="Adicionar R$" value={add[g.id] || ''} onChange={e => setAdd({ ...add, [g.id]: e.target.value })} inputMode="decimal" />
             <button className="btn" onClick={async () => { const v = num(add[g.id] || ''); if (!v) return show('Informe um valor'); try { await upsertGoal({ ...g, userId, saved: g.saved + v }); await reload(); setAdd({ ...add, [g.id]: '' }); show('Valor adicionado. Continue assim!') } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') } }}>Guardar</button>
             <button className="iconbtn" aria-label="Editar meta" onClick={() => edit(g)}><Pencil size={15} /></button>
-            <button className="iconbtn" aria-label="Apagar meta" onClick={async () => { if (!await confirm('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+            <button className="iconbtn" aria-label="Apagar meta" onClick={async () => { if (!await confirmDialog('Apagar esta meta?')) return; try { await deleteGoal(g.id, userId); enqueueDelete('goals', g); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
           </div>
         </div>
       ))}
@@ -704,6 +791,7 @@ function BudgetRow({ cat, budget, reload, show, userId }: any) {
 function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCats, reload, show, goals, isPro, requirePro }: { userId: string; s: any; history: any; tx: Transaction[]; month: string; budgets: Budget[]; bstatus: any; fc: any; expenseCats: string[]; reload: () => Promise<void>; show: (m: string) => void; goals: Goal[]; isPro: boolean; requirePro: () => boolean }) {
   const [view, setView] = useState<'mes' | 'ano'>('mes')
   const bmap = Object.fromEntries(budgets.map((b: any) => [b.category, b]))
+  const spikes = useMemo(() => spendingSpikes(tx, month), [tx, month])
   if (view === 'ano') return <div className="space-y-5"><div className="segment"><button data-active={false} onClick={() => setView('mes')}>Do mês</button><button data-active="true" onClick={() => setView('ano')}>Ano todo</button></div><AnnualView tx={tx} isPro={isPro} requirePro={requirePro} show={show} /></div>
   const pdf = async () => exportPDFReport(`NoAzul — ${monthLabel(month)}`, [
     `Entrou: ${brl(s.income)}`, `Saiu: ${brl(s.expense)}`, `Sobrou: ${brl(s.balance)}`, `Contas fixas: ${brl(s.billsTotal)}`, `Previsão fim do mês: ${brl(fc.projectedBalance)}`, '',
@@ -724,6 +812,18 @@ function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCa
       <h2 className="font-bold">Se continuar assim...</h2>
       <p className="text-sm mt-2 leading-relaxed">Você está gastando cerca de <b>{brl(fc.perDayExpense)} por dia</b>. Até o fim de {monthLabel(month)}, a previsão é sair <b>{brl(fc.projectedExpense)}</b> e sobrar <b>{brl(fc.projectedBalance)}</b> — descontando as contas fixas, <b>{brl(fc.projectedAfterBills)}</b>.</p>
     </section>
+    {spikes.length > 0 && (isPro ? (
+      <section className="card p-5">
+        <h2 className="font-bold flex items-center gap-2"><Sparkles size={18} className="text-violet-500" /> Alertas de gastos</h2>
+        <ul className="mt-3 space-y-2 text-sm">{spikes.map((sp: any) => <li key={sp.category} className="flex gap-2"><span className="dot" /><span><b>{sp.category}</b>: {brl(sp.current)} — <b className="text-rose-600">{sp.pct}%</b> acima da média dos 3 meses anteriores ({brl(sp.avg)}).{sp.pct >= 60 ? ' Vale investigar o que mudou.' : ''}</span></li>)}</ul>
+      </section>
+    ) : (
+      <section className="card p-5 flex items-center gap-3">
+        <Lock size={18} className="text-amber-500 shrink-0" />
+        <div className="text-sm flex-1">Detectamos <b>mudanças grandes nos seus gastos</b> este mês. A análise completa é do Pro.</div>
+        <button className="btn-ghost shrink-0" onClick={requirePro}>Ver no Pro</button>
+      </section>
+    ))}
     <section className="card p-5">
       <h2 className="font-bold">Limites por categoria</h2>
       <p className="muted text-sm">Defina quanto quer gastar no máximo em cada categoria. Ex.: Alimentação até R$ 800.</p>
@@ -736,8 +836,8 @@ function Resumo({ userId, s, history, tx, month, budgets, bstatus, fc, expenseCa
     </section>
     <section className="card p-5">
       <h2 className="font-bold mb-3">Onde você mais gastou</h2>
-      {!s.byCategory.length ? <p className="muted text-sm">Sem gastos neste mês.</p> : s.byCategory.map((c: any, i: number) => (
-        <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, (c.value / s.expense) * 100) + '%', background: PIE_COLORS[i % PIE_COLORS.length] }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>
+      {!s.byCategory.length ? <p className="muted text-sm">Sem gastos neste mês.</p> : s.byCategory.map((c: any) => (
+        <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, (c.value / s.expense) * 100) + '%', background: categoryColor(c.name) }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>
       ))}
       <div className="flex gap-2 flex-wrap mt-5">
         <button className="btn-ghost" onClick={() => exportCSV(tx.filter((t: any) => monthKey(t.date) === month).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-${month}.csv`)}><Download size={15} /> Planilha do mês (CSV)</button>
@@ -779,7 +879,7 @@ function AnnualView({ tx, isPro, requirePro, show }: any) {
       {a.count ? <div style={{ height: 260 }}><ResponsiveContainer><BarChart data={a.months}><XAxis dataKey="label" /><YAxis width={55} /><Tooltip formatter={(v: any) => brl(v)} /><Legend /><Bar dataKey="income" name="Entrou" fill={GREEN} radius={[6, 6, 0, 0]} /><Bar dataKey="expense" name="Saiu" fill={ROSE} radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div> : <Empty text={`Nenhum movimento em ${year} ainda.`} />}
     </section>
     <div className="grid md:grid-cols-2 gap-4">
-      <section className="card p-5"><h2 className="font-bold mb-3">Onde mais gastou no ano</h2>{a.byCategory.length ? a.byCategory.slice(0, 6).map((c: any, i: number) => <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, a.expense ? (c.value / a.expense) * 100 : 0) + '%', background: PIE_COLORS[i % PIE_COLORS.length] }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>) : <p className="muted text-sm">Sem gastos no ano.</p>}</section>
+      <section className="card p-5"><h2 className="font-bold mb-3">Onde mais gastou no ano</h2>{a.byCategory.length ? a.byCategory.slice(0, 6).map((c: any) => <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, a.expense ? (c.value / a.expense) * 100 : 0) + '%', background: categoryColor(c.name) }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>) : <p className="muted text-sm">Sem gastos no ano.</p>}</section>
       <section className="card p-5"><h2 className="font-bold mb-3">Melhor e pior mês</h2>{a.bestMonth ? <div className="space-y-2 text-sm"><div>Melhor: <b className="capitalize">{monthLabel(a.bestMonth.month)}</b> — sobraram {brl(a.bestMonth.balance)}</div><div>Pior: <b className="capitalize">{monthLabel(a.worstMonth!.month)}</b> — {a.worstMonth!.balance >= 0 ? 'sobraram' : 'faltaram'} {brl(Math.abs(a.worstMonth!.balance))}</div><div className="muted">Média de gastos por mês: {brl(a.avgExpense)}</div></div> : <p className="muted text-sm">Sem dados.</p>}</section>
     </div>
     {isPro ? (
@@ -905,7 +1005,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: { userId: s
   }
   const editTx = (t: any) => { setEditingTxId(t.id); setTxForm({ type: t.type, date: t.date, amount: String(t.amount).replace('.', ','), quantity: String(t.quantity).replace('.', ','), unitPrice: String(t.unitPrice).replace('.', ','), description: t.description }) }
   const removeTx = async (t: any) => {
-    if (!selected || !await confirm('Excluir esta movimentação? O investimento será recalculado.')) return
+    if (!selected || !await confirmDialog('Excluir esta movimentação? O investimento será recalculado.')) return
     const updated = reverseTransaction(selected, t)
     try { await deleteInvestmentTransaction(t.id, userId, updated); if (editingTxId === t.id) setEditingTxId(null); await reload(); show('Movimentação excluída') } catch (e: any) { show(e?.message || 'Não foi possível excluir') }
   }
@@ -924,7 +1024,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: { userId: s
       <Stat icon={<PiggyBank size={20} />} label="Retorno total" value={`${brl(s.totalReturn)} (${s.totalReturnPct}%)`} tone="neutral" />
     </div>
     <div className="grid md:grid-cols-2 gap-4">
-      <section className="card p-5"><h2 className="font-bold mb-3">Distribuição por categoria</h2>{s.byCategory.length ? s.byCategory.map((c: any, i: number) => <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, s.totalCurrent ? (c.value / s.totalCurrent) * 100 : 0) + '%', background: PIE_COLORS[i % PIE_COLORS.length] }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>) : <p className="muted text-sm">Cadastre seu primeiro investimento abaixo.</p>}</section>
+      <section className="card p-5"><h2 className="font-bold mb-3">Distribuição por categoria</h2>{s.byCategory.length ? s.byCategory.map((c: any) => <div key={c.name} className="catrow"><span className="w-36 shrink-0">{c.name}</span><div className="progress flex-1"><div style={{ width: Math.max(4, s.totalCurrent ? (c.value / s.totalCurrent) * 100 : 0) + '%', background: categoryColor(c.name) }} /></div><b className="w-24 text-right">{brl(c.value)}</b></div>) : <p className="muted text-sm">Cadastre seu primeiro investimento abaixo.</p>}</section>
       <section className="card p-5"><h2 className="font-bold mb-3">Evolução do capital líquido aportado</h2>{s.evolution.length ? <div style={{ height: 220 }}><ResponsiveContainer><BarChart data={s.evolution}><XAxis dataKey="month" /><YAxis width={55} /><Tooltip formatter={(v: any) => brl(v)} /><Bar dataKey="invested" name="Capital líquido" fill={GREEN} radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div> : <p className="muted text-sm">Registre movimentações de compra/venda para ver a evolução.</p>}</section>
     </div>
     <section className="card p-5 md:p-6">
@@ -956,7 +1056,7 @@ function Investimentos({ userId, investments, allTx, reload, show }: { userId: s
           <div className="text-right"><b>{brl(inv.currentValue)}</b><div className={`text-xs font-bold ${g.gain >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{g.gain >= 0 ? '+' : ''}{brl(g.gain)} ({g.pct}%)</div></div>
           <button className="btn-ghost" onClick={() => setSelectedId(inv.id)}>Detalhes</button>
           <button className="iconbtn" aria-label="Editar investimento" onClick={() => edit(inv)}><Pencil size={15} /></button>
-          <button className="iconbtn" aria-label="Excluir investimento" onClick={async () => { if (!await confirm(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
+          <button className="iconbtn" aria-label="Excluir investimento" onClick={async () => { if (!await confirmDialog(`Excluir ${inv.name} e todo o histórico de movimentações?`)) return; try { await deleteInvestment(inv.id, userId); if (selectedId === inv.id) setSelectedId(null); await reload(); show('Investimento excluído') } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }}><Trash2 size={15} /></button>
         </div>) })}
     </section>
     {selected && <section className="card p-5 md:p-6 space-y-4">
@@ -1173,7 +1273,7 @@ function Perfil({ auth, name, setName, show, isPro, pro, goPro, syncState, runSy
         <div className="text-sm break-all">E-mail: <b>{email}</b></div>
         <div className="text-sm muted">{syncText}</div>
         <div className="flex gap-2 flex-wrap"><button className="btn-ghost" onClick={runSync}>Sincronizar agora</button><button className="btn-ghost" onClick={async () => { await auth.signOut(); window.location.reload() }}><LogOut size={15} /> Sair da conta</button></div>
-        <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirm('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
+        <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirmDialog('Excluir conta e todos os dados na nuvem? Isso é definitivo.')) return; const r = await auth.deleteAccount(); show(r.error || 'Conta excluída'); if (!r.error) window.location.reload() }}>Excluir conta</button>
         <p className="muted text-xs">A exclusão apaga seus dados na nuvem. Os dados locais deste aparelho continuam até você apagá-los em Ajustes → Zona de perigo.</p>
       </> : <p className="muted text-sm">Sem conta conectada: o NoAzul está em <b>modo local</b> e seus dados ficam só neste aparelho. Configure o Supabase para sincronizar entre dispositivos.</p>}
     </section>
@@ -1221,7 +1321,7 @@ function Config({ userId, dark, setDark, categories, bills, payments, tx, reload
         <select className="input !w-auto" value={catType} onChange={e => setCatType(e.target.value as any)}><option value="out">Saída</option><option value="in">Entrada</option></select>
         <button className="btn" onClick={async () => { if (!catName.trim()) return show('Informe o nome da categoria'); try { await addCategory(catName.trim(), catType, userId); await reload(); setCatName(''); show('Categoria criada') } catch (e:any) { show(e?.message || 'Não foi possível salvar.') } }}><Plus size={16} /> Criar</button>
       </div>
-      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!await confirm(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
+      {(['out', 'in'] as const).map(tp => <div key={tp}><div className="label">{tp === 'out' ? 'Saídas' : 'Entradas'}</div><div className="chips">{categories.filter((c: any) => c.type === tp).map((c: any) => <span key={c.name} className="chip flex items-center gap-1">{c.name}<button onClick={async () => { if (!await confirmDialog(`Apagar a categoria ${c.name}?`)) return; try { await deleteCategory(c.name, tp, userId); enqueueDelete('categories', { ...c, id: c.name }); await reload() } catch (e:any) { show(e?.message || 'Não foi possível excluir.') } }} aria-label="Apagar categoria"><Trash2 size={12} /></button></span>)}</div></div>)}
     </section>
     <section className="card p-6 space-y-4">
       <h2 className="font-bold">Lembretes de contas</h2>
@@ -1251,7 +1351,7 @@ function Config({ userId, dark, setDark, categories, bills, payments, tx, reload
     <section className="card p-6 space-y-3" style={{ borderColor: '#FECDD3' }}>
       <h2 className="font-bold text-rose-600">Zona de perigo</h2>
       <p className="muted text-sm">Apaga todos os movimentos, contas, metas, limites e recorrências deste aparelho. Não tem como desfazer.</p>
-      <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirm('Tem certeza? Todos os seus dados serão apagados.')) return; if (!await confirm('Última chance: apagar tudo mesmo?')) return; try { await clearAllData(userId); await reload(); show('Todos os dados foram apagados') } catch (e:any) { show(e?.message || 'Não foi possível apagar.') } }}><Trash2 size={15} /> Apagar todos os meus dados</button>
+      <button className="btn-ghost text-rose-600" onClick={async () => { if (!await confirmDialog('Tem certeza? Todos os seus dados serão apagados.')) return; if (!await confirmDialog('Última chance: apagar tudo mesmo? Não tem como desfazer.', { confirmLabel: 'Apagar tudo' })) return; try { await clearAllData(userId); await reload(); show('Todos os dados foram apagados') } catch (e:any) { show(e?.message || 'Não foi possível apagar.') } }}><Trash2 size={15} /> Apagar todos os meus dados</button>
     </section>
     <section className="card p-6">
       <div className="font-bold text-sm">Sobre o NoAzul</div>

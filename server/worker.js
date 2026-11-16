@@ -733,12 +733,12 @@ export default {
       const email = normalizeEmail(body.email)
       if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
       const rateKey = `portal_status_rate:${email}`
-      const last = await env.LICENSE_DO.get(rateKey)
+      const last = await env.LICENSES.get(rateKey)
       const NOW = Date.now()
       if (last && NOW - Number(last) < 60000) {
         return json({ ok: false, error: 'rate_limited', message: 'Tente novamente em 1 minuto.' }, 429, { 'retry-after': '60' })
       }
-      await env.LICENSE_DO.put(rateKey, String(NOW), { expiry: 900 })
+      await env.LICENSES.put(rateKey, String(NOW), { expirationTtl: 900 })
       const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName(email))
       const r = await stub.fetch('https://license-store/internal/portal-status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
       return json(await r.json().catch(() => ({ ok: false, error: 'failed', message: 'Tente novamente.' })), r.status)
@@ -1039,12 +1039,12 @@ export default {
       if (!deviceId) return json({ ok: false, error: 'device_required', message: 'Identificação do aparelho ausente.' }, 400)
       if (!env.LICENSE_DO) return json({ ok: false, error: 'do_not_configured' }, 500)
       const rateKey = `license_rate:${email}`
-      const last = await env.LICENSE_DO.get(rateKey)
+      const last = await env.LICENSES.get(rateKey)
       const NOW = Date.now()
       if (last && NOW - Number(last) < 60000) {
         return json({ ok: false, error: 'rate_limited', message: 'Tente novamente em 1 minuto.' }, 429, { 'retry-after': '60' })
       }
-      await env.LICENSE_DO.put(rateKey, String(NOW), { expiry: 900 })
+      await env.LICENSES.put(rateKey, String(NOW), { expirationTtl: 900 })
       const opId = crypto.randomUUID()
       try { await freezeAcquire(env, opId) } catch (e) { const s = e?.status || 500; return json({ ok: false, error: s === 503 ? 'frozen' : 'registry_failed' }, s === 503 ? 503 : 500) }
       try {
