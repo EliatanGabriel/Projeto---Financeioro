@@ -32,8 +32,9 @@ A URL final fica tipo `https://noazul-license.seu-subdominio.workers.dev`.
 
 ## Ligar no app
 - Ajustes → **URL do servidor de licenças** → cole a URL do Worker (ou edite `LICENSE_API_URL` em `src/config/plans.ts`).
-- O cliente paga na Cakto, abre a tela Pro, digita o **e-mail da compra** e toca em
-  **Verificar minha assinatura** — o Pro ativa sozinho. Renovação/cancelamento são automáticos.
+- O cliente paga na Cakto, abre a tela Pro, digita o **e-mail da compra** e o **ID do pedido**
+  (está no e-mail de confirmação da Cakto) e toca em **Verificar minha assinatura** — o Pro ativa sozinho.
+  O ID só é pedido no primeiro aparelho; depois ele fica salvo e a renovação/cancelamento são automáticos.
 
 ## Painel admin e portal do cliente (UI)
 - **Painel:** `GET https://SEU-WORKER/admin` — informe o `ADMIN_TOKEN` para listar licenças (status, validade, aparelho mascarado), buscar por e-mail, resetar aparelho e congelar/descongelar o serviço. O token fica só em `sessionStorage`; recomenda-se proteger `/admin` com **Cloudflare Access** além do token.
@@ -45,6 +46,7 @@ A URL final fica tipo `https://noazul-license.seu-subdominio.workers.dev`.
 - `PRIVATE_KEY_PEM`, `CAKTO_WEBHOOK_SECRET` e `ADMIN_TOKEN` ficam só no Worker (secrets). Nunca no app, nunca no git (`.gitignore` protege `tools/private.key.pem`).
 - O webhook valida a assinatura HMAC da Cakto e ignora pedido já processado (idempotente, também por período de assinatura).
 - **Pin de dispositivo:** o primeiro aparelho que ativar fica vinculado à assinatura; outro aparelho recebe `409 device_mismatch`.
+- **Prova de compra:** `/license` não emite chave só com e-mail. Para vincular o primeiro aparelho exige `orderId` recebido pelo webhook; o mesmo aparelho já vinculado renova sem repetir o ID. `LICENSE_EMAIL_ONLY_FALLBACK=true` existe apenas para migração/testes — nunca use em produção.
 - Para trocar de aparelho (suporte): `curl -X POST https://SEU-WORKER/admin/reset-device -H 'content-type: application/json' -d '{"email":"cliente@email.com","token":"SEU_ADMIN_TOKEN"}'`
 - Cancelamento mantém o acesso até o fim do período pago; reembolso/chargeback revoga na hora. `/license` tem limite simples de 20 tentativas/min por e-mail.
 

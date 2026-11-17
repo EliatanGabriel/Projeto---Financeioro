@@ -29,11 +29,11 @@ export function isProActive(payload?: LicensePayload | null, now = new Date()): 
   if (!payload.expiresAt) return false
   return new Date(payload.expiresAt).getTime() > now.getTime()
 }
-export async function fetchAutoLicense(apiUrl: string, email: string, deviceId: string): Promise<{ ok: boolean; key?: string; expiresAt?: string | null; holder?: string; plan?: string; error?: string; message?: string }> {
+export async function fetchAutoLicense(apiUrl: string, email: string, deviceId: string, orderId = ''): Promise<{ ok: boolean; key?: string; expiresAt?: string | null; holder?: string; plan?: string; error?: string; message?: string }> {
   const base = String(apiUrl || '').replace(/\/$/, '')
   if (!base) return { ok: false, error: 'not_configured', message: 'Ativação automática ainda não foi configurada.' }
   let r: Response
-  try { r = await fetch(`${base}/license?email=${encodeURIComponent(email.trim().toLowerCase())}&deviceId=${encodeURIComponent(deviceId)}`) }
+  try { r = await fetch(`${base}/license?email=${encodeURIComponent(email.trim().toLowerCase())}&deviceId=${encodeURIComponent(deviceId)}&orderId=${encodeURIComponent(String(orderId || '').trim())}`) }
   catch { return { ok: false, error: 'network', message: 'Sem internet. Confira a conexão e tente de novo.' } }
   const data = await r.json().catch(() => ({}))
   if (!r.ok || !data.ok) return { ok: false, error: data.error || 'failed', message: data.message || 'Não encontramos assinatura ativa para este e-mail.' }

@@ -4,9 +4,9 @@
 O pagamento é feito **fora do app, na Cakto** (checkout seguro, cartão/Pix, assinatura mensal).
 
 **Automático (recomendado):** um servidor pequeno (`server/`, Cloudflare Worker) recebe o
-webhook da Cakto, guarda a assinatura por e-mail e emite a chave sozinho. O cliente só
-digita o e-mail da compra na tela Pro → **Verificar minha assinatura**. Guia de deploy em
-`server/README.md`.
+webhook da Cakto, guarda a assinatura por e-mail e emite a chave sozinho. O cliente digita
+o e-mail da compra e o **ID do pedido** (do e-mail de confirmação da Cakto) na tela Pro →
+**Verificar minha assinatura**. Guia de deploy em `server/README.md`.
 
 **Manual (alternativa):** você confirma o pagamento no painel da Cakto e gera a chave
 com a ferramenta abaixo; o cliente cola a chave na tela Pro.

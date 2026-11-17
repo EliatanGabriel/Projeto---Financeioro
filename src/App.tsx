@@ -173,9 +173,9 @@ export default function App() {
         const v = await verifyLicense(savedKey, getDeviceId())
         const days = v.payload ? proDaysLeft(v.payload) : 0
         if (v.ok && isProActive(v.payload) && days > 7) return
-        const savedEmail = await getSetting('caktoEmail'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
+        const savedEmail = await getSetting('caktoEmail'); const savedOrderId = await getSetting('caktoOrderId'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
         if (!savedEmail || !isLicenseApiConfigured(api)) return
-        const r = await fetchAutoLicense(api, savedEmail, getDeviceId())
+        const r = await fetchAutoLicense(api, savedEmail, getDeviceId(), savedOrderId)
         if (r.ok && r.key) { const nv = await verifyLicense(r.key, getDeviceId()); if (nv.ok && isProActive(nv.payload)) { await setSetting('licenseKey', r.key); await setSetting('licenseHolder', nv.payload!.holder); await setSetting('licenseExpires', nv.payload!.expiresAt || ''); await setSetting('plan', nv.payload!.plan); await reload() } }
       } catch {}
     })()
@@ -1108,8 +1108,8 @@ function Investimentos({ userId, investments, allTx, reload, show }: { userId: s
 
 function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConfigured, reload, show }: { pro: any; checkout: string; checkoutConfigured: boolean; licenseApi: string; licenseApiConfigured: boolean; reload: () => Promise<void>; show: (m: string) => void }) {
   const [key, setKey] = useState(''); const [msg, setMsg] = useState('')
-  const [email, setEmail] = useState(''); const [checking, setChecking] = useState(false)
-  useEffect(() => { getSetting('caktoEmail').then(v => { if (v) setEmail(v) }) }, [])
+  const [email, setEmail] = useState(''); const [orderId, setOrderId] = useState(''); const [checking, setChecking] = useState(false)
+  useEffect(() => { getSetting('caktoEmail').then(v => { if (v) setEmail(v) }); getSetting('caktoOrderId').then(v => { if (v) setOrderId(v) }) }, [])
   const dev = getDeviceId()
   const saveLicense = async (k: string, holder: string, expiresAt: any, plan: string) => {
     await setSetting('activated', '1'); await setSetting('licenseKey', k); await setSetting('licenseHolder', holder); await setSetting('licenseExpires', expiresAt || ''); await setSetting('plan', plan)
@@ -1128,14 +1128,15 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
     if (!email.trim() || !email.includes('@')) { setMsg('Informe o e-mail usado na Cakto.'); return }
     setChecking(true); setMsg('Verificando sua assinatura...')
     try {
-      const r = await fetchAutoLicense(licenseApi, email, dev)
+      const r = await fetchAutoLicense(licenseApi, email, dev, orderId)
       if (!r.ok || !r.key) {
-        const msgs: Record<string, string> = { device_mismatch: 'Esta assinatura já está ativa em outro aparelho. Para trocar, fale com o suporte.', not_active: 'Não encontramos assinatura ativa para este e-mail. Confira o e-mail ou renove na Cakto.', network: 'Sem internet. Confira a conexão e tente de novo.', rate_limited: 'Muitas tentativas. Aguarde alguns instantes e tente de novo.' }
+        const msgs: Record<string, string> = { purchase_required: 'Informe o ID do pedido da Cakto — ele aparece no e-mail de compra.', device_mismatch: 'Esta assinatura já está ativa em outro aparelho. Para trocar, fale com o suporte.', not_active: 'Não encontramos assinatura ativa para este e-mail. Confira o e-mail ou renove na Cakto.', network: 'Sem internet. Confira a conexão e tente de novo.', rate_limited: 'Muitas tentativas. Aguarde alguns instantes e tente de novo.' }
         setMsg(msgs[r.error || ''] || r.message || 'Não encontramos assinatura ativa para este e-mail.'); return
       }
       const v = await verifyLicense(r.key, dev)
       if (!v.ok || !isProActive(v.payload)) { setMsg('Resposta inválida do servidor. Tente de novo.'); return }
       await setSetting('caktoEmail', email.trim().toLowerCase())
+      await setSetting('caktoOrderId', orderId.trim())
       await saveLicense(r.key, v.payload!.holder, v.payload!.expiresAt, v.payload!.plan)
     } catch { setMsg('Não foi possível verificar agora. Confira sua internet e tente de novo.') } finally { setChecking(false) }
   }
@@ -1163,8 +1164,10 @@ function ProView({ pro, checkout, checkoutConfigured, licenseApi, licenseApiConf
     </section>
     <section className="card p-5 space-y-4">
       <h2 className="font-bold flex items-center gap-2"><Sparkles size={18} className="text-violet-500" /> Ativar automaticamente</h2>
-      <p className="muted text-sm">Pagou na Cakto? Digite o <b>mesmo e-mail</b> da compra e toque em verificar — o Pro libera sozinho, sem chave.</p>
+      <p className="muted text-sm">Pagou na Cakto? Digite o <b>mesmo e-mail</b> da compra e o <b>ID do pedido</b> (está no e-mail de confirmação). O Pro libera sozinho, sem chave.</p>
       <input className="input" type="email" placeholder="seu@email.com" value={email} onChange={e => setEmail(e.target.value)} />
+      <input className="input" placeholder="ID do pedido (ex.: 123456)" value={orderId} onChange={e => setOrderId(e.target.value)} />
+      <p className="muted text-xs">O ID do pedido só é exigido na primeira ativação deste aparelho. Depois o app guarda ele e renova sozinho.</p>
       <button className="btn w-full" onClick={activateAuto} disabled={checking}><Check size={16} /> {checking ? 'Verificando...' : 'Verificar minha assinatura'}</button>
       {!licenseApiConfigured && <p className="muted text-xs">Ativação automática ainda não configurada pelo dono — use a chave manual abaixo.</p>}
       {msg && <p className="text-sm">{msg}</p>}

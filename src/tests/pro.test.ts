@@ -29,7 +29,9 @@ describe('plano Pro mensal', () => {
     const orig = globalThis.fetch
     const set = (impl: any) => { globalThis.fetch = impl }
     try {
-      set(async () => new Response(JSON.stringify({ ok: true, key: 'K' }), { status: 200 })); expect((await fetchAutoLicense('https://x', 'a@b.com', 'd')).key).toBe('K')
+      let url = ''
+      set(async (u: any) => { url = String(u); return new Response(JSON.stringify({ ok: true, key: 'K' }), { status: 200 }) }); expect((await fetchAutoLicense('https://x', 'a@b.com', 'd', 'ord-1')).key).toBe('K')
+      expect(url).toContain('orderId=ord-1')
       set(async () => new Response(JSON.stringify({ ok: false, error: 'not_active', message: 'genérica' }), { status: 404 })); expect((await fetchAutoLicense('https://x', 'a@b.com', 'd')).error).toBe('not_active')
       set(async () => new Response(JSON.stringify({ ok: false, error: 'device_mismatch', message: 'outro aparelho' }), { status: 409 })); expect((await fetchAutoLicense('https://x', 'a@b.com', 'd')).error).toBe('device_mismatch')
       set(async () => new Response('erro', { status: 500 })); expect((await fetchAutoLicense('https://x', 'a@b.com', 'd')).ok).toBe(false)

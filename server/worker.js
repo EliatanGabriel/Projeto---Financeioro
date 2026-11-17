@@ -3,10 +3,11 @@
 // Segredos (variáveis de ambiente / secrets do Worker):
 //   CAKTO_WEBHOOK_SECRET  - segredo do webhook criado na Cakto
 //   PRIVATE_KEY_PEM       - conteúdo de tools/private.key.pem (NUNCA no app, NUNCA no git)
+//   LICENSE_EMAIL_ONLY_FALLBACK - "true" só em migração/testes: aceita e-mail sem ID do pedido
 // Binding: LICENSES (KV namespace) para guardar sub:<email>
 // Rotas:
 //   POST /webhook/cakto
-//   GET  /license?email=...&deviceId=...
+//   GET  /license?email=...&deviceId=...&orderId=...
 //   GET  /health
 
 /**
@@ -326,6 +327,7 @@ async _handle(request) {
     if (url.pathname === '/internal/license' && request.method === 'GET') {
       const email = normalizeEmail(url.searchParams.get('email'))
       const deviceId = String(url.searchParams.get('deviceId') || '').trim()
+      const orderId = normalizePurchaseId(url.searchParams.get('orderId') || url.searchParams.get('purchaseId'))
       if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
       if (!deviceId) return json({ ok: false, error: 'device_required', message: 'Identificação do aparelho ausente.' }, 400)
       const opId = String(url.searchParams.get('opId') || '')
@@ -344,7 +346,27 @@ async _handle(request) {
       if (sub.deviceId && sub.deviceId !== deviceId) {
         return json({ ok: false, error: 'device_mismatch', message: 'Esta assinatura já está ativa em outro aparelho. Para trocar, fale com o suporte.' }, 409)
       }
-      if (!sub.deviceId) { sub.deviceId = deviceId; sub.updatedAt = new Date(Math.max(Date.now(), Date.parse(sub.updatedAt) || 0)).toISOString(); await this._adapter().put(`sub:${email}`, JSON.stringify(sub)) }
+      if (!sub.deviceId) {
+        const emailOnly = String(this.env?.LICENSE_EMAIL_ONLY_FALLBACK || '').toLowerCase() === 'true'
+        if (!emailOnly) {
+          const nowMs = Date.now()
+          const badKey = `badproof:${email}`
+          const bad = await this.storage.get(badKey) || { count: 0, windowStart: nowMs, lockedUntil: 0 }
+          if (bad.lockedUntil > nowMs) return json({ ok: false, error: 'rate_limited', message: 'Muitas tentativas com ID inválido. Aguarde alguns instantes.' }, 429)
+          if (nowMs - bad.windowStart >= 15 * 60 * 1000) { bad.count = 0; bad.windowStart = nowMs; bad.lockedUntil = 0 }
+          if (!orderId || !knownPurchaseIds(sub).includes(orderId)) {
+            bad.count++
+            if (bad.count >= 5) bad.lockedUntil = nowMs + 15 * 60 * 1000
+            await this.storage.put(badKey, bad)
+            return json({ ok: false, error: 'purchase_required', message: 'Informe o ID do pedido da Cakto (está no e-mail de compra).' }, 403)
+          }
+          await this.storage.delete(badKey)
+        }
+        sub.deviceId = deviceId
+        if (orderId) sub.boundOrderId = orderId
+        sub.updatedAt = new Date(Math.max(Date.now(), Date.parse(sub.updatedAt) || 0)).toISOString()
+        await this._adapter().put(`sub:${email}`, JSON.stringify(sub))
+      }
       return json({ ok: true, expiresAt: sub.expiresAt, holder: sub.name || email, plan: 'pro-monthly' })
     }
     if (url.pathname === '/internal/admin-gate' && request.method === 'POST') {
@@ -395,6 +417,22 @@ const DEACTIVATE_EVENTS = new Set(['subscription_canceled', 'subscription_paused
 const tolerance = 5 * 60
 
 export const normalizeEmail = (e) => String(e || '').trim().toLowerCase()
+export const normalizePurchaseId = (id) => String(id ?? '').trim().slice(0, 128)
+/** IDs de pedido já vistos para este e-mail (migra registros legados que só tinham lastOrderId). */
+export function knownPurchaseIds(sub) {
+  const out = []
+  for (const id of [sub?.lastOrderId, ...(Array.isArray(sub?.orderIds) ? sub.orderIds : [])]) {
+    const value = normalizePurchaseId(id)
+    if (value && !out.includes(value)) out.push(value)
+  }
+  return out
+}
+function rememberPurchaseId(sub, id) {
+  const out = knownPurchaseIds(sub)
+  const value = normalizePurchaseId(id)
+  if (value && !out.includes(value)) out.push(value)
+  return out
+}
 export function addMonths(date, months = 1) { const d = new Date(date); d.setMonth(d.getMonth() + months); return d }
 
 export const normalizeSecret = (s) => String(s || '').trim()
@@ -548,13 +586,17 @@ export async function processEvent(payload, kv) {
     const email = normalizeEmail(data?.customer?.email || data?.customerEmail)
     if (!email) continue
     const orderId = data?.id || ''
-    if (orderId) {
-      const seen = await kv.get(`order:${orderId}`)
-      if (seen) { results.push({ email, skipped: 'duplicate' }); continue }
-    }
     const subKey = `sub:${email}`
     const existingRaw = await kv.get(subKey)
     const existing = existingRaw ? JSON.parse(existingRaw) : null
+    const orderIds = rememberPurchaseId(existing, orderId)
+    if (orderId) {
+      const seen = await kv.get(`order:${orderId}`)
+      if (seen) {
+        if (existing && orderIds.length !== knownPurchaseIds(existing).length) await kv.put(subKey, JSON.stringify({ ...existing, orderIds, lastOrderId: orderId || existing.lastOrderId || null }))
+        results.push({ email, skipped: 'duplicate' }); continue
+      }
+    }
     const now = new Date()
     const isResume = event === 'subscription_resumed'
     // Watermark por assinatura: mapa subscription.id -> maior ciclo já estendido (migra lastCycle legado).
@@ -567,6 +609,7 @@ export async function processEvent(payload, kv) {
     // Sem subscription.id: apenas order:<id> (acima) — nenhuma comparação entre assinaturas.
     if (ACTIVATE_EVENTS.has(event) && !isResume && subId && cycleNum != null && cycleNum <= (lastCycles[subId] ?? 0)) {
       results.push({ email, skipped: 'duplicate_cycle' })
+      if (existing && orderIds.length !== knownPurchaseIds(existing).length) await kv.put(subKey, JSON.stringify({ ...existing, orderIds, lastOrderId: orderId || existing.lastOrderId || null }))
       if (orderId) await kv.put(`order:${orderId}`, '1')
       continue
     }
@@ -574,21 +617,21 @@ export async function processEvent(payload, kv) {
       // Retomada não é nova cobrança/ciclo: restaura o acesso SEM estender e SEM avançar o watermark.
       if (!existing) { results.push({ email, skipped: 'resume_without_subscription' }) }
       else {
-        await kv.put(subKey, JSON.stringify({ ...existing, email, status: 'active', revoked: false, updatedAt: now.toISOString(), lastOrderId: orderId }))
+        await kv.put(subKey, JSON.stringify({ ...existing, email, status: 'active', revoked: false, updatedAt: now.toISOString(), orderIds, lastOrderId: orderId || existing.lastOrderId || null }))
         results.push({ email, status: 'active', expiresAt: existing.expiresAt || null, resumed: true })
       }
     } else if (ACTIVATE_EVENTS.has(event)) {
       const base = existing?.expiresAt && new Date(existing.expiresAt) > now && existing.status === 'active' ? new Date(existing.expiresAt) : now
       const expiresAt = addMonths(base, 1).toISOString()
       if (subId && cycleNum != null) lastCycles[subId] = cycleNum
-      await kv.put(subKey, JSON.stringify({ email, name: data?.customer?.name || existing?.name || '', status: 'active', revoked: false, deviceId: existing?.deviceId || null, plan: 'pro-monthly', expiresAt, updatedAt: now.toISOString(), lastOrderId: orderId, lastCycles, lastCycleSubId: subId || existing?.lastCycleSubId || null, lastCycleNum: subId ? (lastCycles[subId] ?? existing?.lastCycleNum ?? null) : (existing?.lastCycleNum ?? null) }))
+      await kv.put(subKey, JSON.stringify({ email, name: data?.customer?.name || existing?.name || '', status: 'active', revoked: false, deviceId: existing?.deviceId || null, plan: 'pro-monthly', expiresAt, updatedAt: now.toISOString(), orderIds, lastOrderId: orderId || existing?.lastOrderId || null, lastCycles, lastCycleSubId: subId || existing?.lastCycleSubId || null, lastCycleNum: subId ? (lastCycles[subId] ?? existing?.lastCycleNum ?? null) : (existing?.lastCycleNum ?? null) }))
       results.push({ email, status: 'active', expiresAt })
     } else if (DEACTIVATE_EVENTS.has(event)) {
       // Cancelamento/pausa de renovação mantém acesso até o fim do período pago; reembolso/chargeback revoga na hora.
       const immediate = event === 'refund' || event === 'chargeback' || event === 'subscription_paused'
       const expiresAt = immediate && (event === 'refund' || event === 'chargeback') ? now.toISOString() : (existing?.expiresAt || now.toISOString())
       const status = event === 'subscription_paused' ? 'paused' : 'canceled'
-      await kv.put(subKey, JSON.stringify({ ...(existing || { email, name: data?.customer?.name || '' }), email, status, revoked: immediate, plan: 'pro-monthly', expiresAt, updatedAt: now.toISOString(), lastOrderId: orderId }))
+      await kv.put(subKey, JSON.stringify({ ...(existing || { email, name: data?.customer?.name || '' }), email, status, revoked: immediate, plan: 'pro-monthly', expiresAt, updatedAt: now.toISOString(), orderIds, lastOrderId: orderId || existing?.lastOrderId || null }))
       results.push({ email, status, expiresAt })
     } else {
       results.push({ email, skipped: 'event_ignored' })
@@ -1035,6 +1078,7 @@ export default {
     if (url.pathname === '/license' && request.method === 'GET') {
       const email = normalizeEmail(url.searchParams.get('email'))
       const deviceId = String(url.searchParams.get('deviceId') || '').trim()
+      const orderId = normalizePurchaseId(url.searchParams.get('orderId') || url.searchParams.get('purchaseId'))
       if (!email) return json({ ok: false, error: 'email_required', message: 'Informe seu e-mail.' }, 400)
       if (!deviceId) return json({ ok: false, error: 'device_required', message: 'Identificação do aparelho ausente.' }, 400)
       if (!env.LICENSE_DO) return json({ ok: false, error: 'do_not_configured' }, 500)
@@ -1050,7 +1094,7 @@ export default {
       try {
         try { await registerEmail(env, email) } catch { return json({ ok: false, error: 'registry_failed' }, 500) }
         const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName(email))
-        const r = await stub.fetch(`https://license-store/internal/license?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(deviceId)}&opId=${encodeURIComponent(opId)}`)
+        const r = await stub.fetch(`https://license-store/internal/license?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(deviceId)}&orderId=${encodeURIComponent(orderId)}&opId=${encodeURIComponent(opId)}`)
         const decision = await r.json().catch(() => ({}))
         if (!decision.ok) return json(decision, r.status)
         if (!env.PRIVATE_KEY_PEM) return json({ ok: false, error: 'server_not_configured' }, 500)

@@ -1,6 +1,6 @@
 // @ts-nocheck — importa server/worker.js (JS sem tipos); não vai para o bundle
 import { describe, it, expect } from 'vitest'
-import worker, { LicenseStore, processEvent, verifyCaktoSignature, verifyBodySecret, authenticateWebhook, extractV1, normalizeEmail, parseCycleNumber, cycleNumber, timingSafeEqualStr, sha256Hex, ADMIN_MAX_FAILURES } from '../../server/worker.js'
+import worker, { LicenseStore, processEvent, verifyCaktoSignature, verifyBodySecret, authenticateWebhook, extractV1, normalizeEmail, normalizePurchaseId, knownPurchaseIds, parseCycleNumber, cycleNumber, timingSafeEqualStr, sha256Hex, ADMIN_MAX_FAILURES } from '../../server/worker.js'
 import { verifyLicense, isProActive, fetchAutoLicense } from '../licensing/licensing'
 import { getLicenseApiUrl, isLicenseApiConfigured } from '../config/plans'
 
@@ -70,7 +70,9 @@ class FakeStorage {
 /** Binding DO falso: uma instância LicenseStore por id, compartilhando o mesmo storage (como no runtime). */
 function makeEnv(legacyKv?: FakeKV, secret = 's') {
   const stores = new Map<string, FakeStorage>(); const instances = new Map<string, any>()
-  const env: any = { LICENSES: legacyKv || new FakeKV(), CAKTO_WEBHOOK_SECRET: secret, PRIVATE_KEY_PEM: PRIVATE_PEM, ADMIN_TOKEN: 'admin-tok' }
+  // A maioria dos testes cobre concorrência/estado, não a prova de compra; o cenário
+  // de segurança dedicado liga a exigência explicitamente (removendo este fallback).
+  const env: any = { LICENSES: legacyKv || new FakeKV(), CAKTO_WEBHOOK_SECRET: secret, PRIVATE_KEY_PEM: PRIVATE_PEM, ADMIN_TOKEN: 'admin-tok', LICENSE_EMAIL_ONLY_FALLBACK: 'true' }
   env.LICENSE_DO = {
     idFromName: (n: string) => n,
     get: (id: string) => {
@@ -138,6 +140,31 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     const v = await verifyTestLicense(data.key, 'dev-123')
     expect(v.ok).toBe(true); expect(isProActive(v.payload)).toBe(true); expect(v.payload!.holder).toBe('Pro User')
     const wrong = await verifyTestLicense(data.key, 'outro-aparelho'); expect(wrong.ok).toBe(false)
+  })
+  it('/license exige ID do pedido da Cakto apenas para vincular o primeiro aparelho', async () => {
+    const kv = new FakeKV() as any
+    const { env } = makeEnv(kv)
+    env.LICENSE_EMAIL_ONLY_FALLBACK = 'false'
+    await processEvent({ event: 'purchase_approved', data: { id: 'ord-prova', customer: { email: 'prova@x.com', name: 'Prova' } } }, kv)
+    expect(knownPurchaseIds(JSON.parse(await kv.get('sub:prova@x.com')))).toEqual(['ord-prova'])
+    const lic = (deviceId: string, orderId = '') => worker.fetch(new Request(`https://x/license?email=prova%40x.com&deviceId=${deviceId}${orderId ? `&orderId=${orderId}` : ''}`), env)
+    const semProva = await lic('dev-1')
+    expect(semProva.status).toBe(403); expect((await semProva.json()).error).toBe('purchase_required')
+    const provaErrada = await lic('dev-1', 'ord-errada')
+    expect(provaErrada.status).toBe(403); expect((await provaErrada.json()).error).toBe('purchase_required')
+    const ok = await lic('dev-1', 'ord-prova')
+    expect(ok.status).toBe(200)
+    expect((await verifyTestLicense((await ok.json()).key, 'dev-1')).ok).toBe(true)
+    const renovacao = await lic('dev-1')
+    expect(renovacao.status).toBe(200)
+    const outroAparelho = await lic('dev-2', 'ord-prova')
+    expect(outroAparelho.status).toBe(409); expect((await outroAparelho.json()).error).toBe('device_mismatch')
+    expect(normalizePurchaseId('  ord-1  ')).toBe('ord-1')
+    const kv2 = new FakeKV() as any; const env2 = makeEnv(kv2).env; env2.LICENSE_EMAIL_ONLY_FALLBACK = 'false'
+    await processEvent({ event: 'purchase_approved', data: { id: 'ord-bloqueio', customer: { email: 'bloqueio@x.com', name: 'B' } } }, kv2)
+    const tentativa = () => worker.fetch(new Request('https://x/license?email=bloqueio%40x.com&deviceId=dev-1&orderId=errada'), env2)
+    for (let i = 0; i < 5; i++) expect((await tentativa()).status).toBe(403)
+    expect((await tentativa()).status).toBe(429)
   })
   it('sem assinatura retorna 404 e app trata', async () => {
     const { env } = makeEnv()
