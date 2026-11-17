@@ -1,4 +1,4 @@
-import { canonicalHash, diffRecords, processQueue, type SyncEntity, type SyncQueueOp, type SyncConflict } from './engine'
+import { canonicalHash, diffRecords, processQueue, SYNC_DELETED_HASH, type SyncEntity, type SyncQueueOp, type SyncConflict } from './engine'
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error' | 'conflict'
 export interface SyncState { status: SyncStatus; lastSyncAt: string | null; pending: number; conflicts: SyncConflict[]; message: string | null }
@@ -20,6 +20,7 @@ export interface SyncStore {
   addConflicts(conflicts: SyncConflict[]): Promise<void>
   getConflicts(): Promise<SyncConflict[]>
   resolveConflictLocal(entity: SyncEntity, recordId: string, row: any): Promise<void>
+  deleteLocal(entity: SyncEntity, recordId: string): Promise<void>
 }
 
 export async function syncAll(store: SyncStore, client: SyncClient, entities: SyncEntity[], onState: (s: SyncState) => void): Promise<SyncState> {
@@ -38,7 +39,7 @@ export async function syncAll(store: SyncStore, client: SyncClient, entities: Sy
       const local = await store.listLocal(entity)
       const remote = await client.fetchAll(entity)
       const meta = await store.getMeta(entity)
-      const { toPush, toPull, conflicts: cs } = diffRecords(entity, local, remote, meta)
+      const { toPush, toPull, conflicts: cs, tombstonesToPush } = diffRecords(entity, local, remote, meta)
       conflicts.push(...cs)
       const newMeta = new Map(meta)
       for (const row of toPush) {
@@ -49,6 +50,10 @@ export async function syncAll(store: SyncStore, client: SyncClient, entities: Sy
         if (cs.some(c => c.recordId === row.id)) continue
         await store.replaceLocal(entity, [row])
         newMeta.set(row.id, { hash: canonicalHash(row), version: row.version || 1 })
+      }
+      for (const row of tombstonesToPush) {
+        await store.deleteLocal(entity, row.id)
+        newMeta.set(row.id, { hash: SYNC_DELETED_HASH, version: row.version || 1 })
       }
       await store.setMeta(entity, newMeta)
       await store.setLastPulledAt(entity, new Date().toISOString())

@@ -22,9 +22,11 @@ const UPSERTS: Record<string, (row: any, u: string) => Promise<any>> = {
 }
 const DELETES: Record<string, (id: string, u: string) => Promise<any>> = {
   transactions: (id, u) => db.deleteTransaction(id, u), fixed_bills: (id, u) => db.deleteFixedBill(id, u), goals: (id, u) => db.deleteGoal(id, u),
-  budgets: (id, u) => db.setBudget(id, 0, u), bill_payments: (_id, _u) => Promise.resolve(), recurrences: (id, u) => db.deleteRecurrence(id, u),
-  recurrence_launches: (_id, _u) => Promise.resolve(), categories: (_id, _u) => Promise.resolve(), goal_auto_launches: (_id, _u) => Promise.resolve(),
-  investments: (id, u) => db.deleteInvestment(id, u), investment_transactions: (_id, _u) => Promise.resolve(),
+  budgets: (id, u) => db.setBudget(id, 0, u), bill_payments: (id, u) => { const i = id.lastIndexOf(':'); return i < 0 ? Promise.resolve() : db.setBillPaid(id.slice(0, i), id.slice(i + 1), false, u) }, recurrences: (id, u) => db.deleteRecurrence(id, u),
+  recurrence_launches: (id, u) => { const i = id.lastIndexOf(':'); return i < 0 ? Promise.resolve() : db.unmarkRecurrenceLaunched(id.slice(0, i), id.slice(i + 1), u) },
+  categories: (id, u) => { const i = id.indexOf(':'); return i < 0 ? Promise.resolve() : db.deleteCategory(id.slice(i + 1), id.slice(0, i) as 'in' | 'out', u) },
+  goal_auto_launches: (id, u) => { const i = id.lastIndexOf(':'); return i < 0 ? Promise.resolve() : db.unmarkGoalAutoLaunched(id.slice(0, i), id.slice(i + 1), u) },
+  investments: (id, u) => db.deleteInvestment(id, u), investment_transactions: (id, u) => db.deleteInvestmentTransactionRecord(id, u),
   credit_cards: (id, u) => db.deleteCreditCard(id, u), credit_card_purchases: (id, u) => db.deleteCreditCardPurchase(id, u),
   credit_card_payments: (id, u) => { const i = id.lastIndexOf(':'); return i < 0 ? Promise.resolve() : db.setCreditCardPaid(id.slice(0, i), id.slice(i + 1), false, u) },
 }

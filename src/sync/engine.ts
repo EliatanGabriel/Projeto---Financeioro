@@ -8,6 +8,7 @@ export const SYNC_ENTITIES: SyncEntity[] = ['transactions','fixed_bills','goals'
 export interface SyncRow { id: string; userId: string; updatedAt?: string; version?: number; deletedAt?: string | null; [k: string]: any }
 export interface SyncQueueOp { opId: string; entity: SyncEntity; recordId: string; op: 'upsert' | 'delete'; payload: any; baseVersion: number; userId?: string; attempts: number; nextRetryAt: string | null; createdAt: string }
 export interface SyncConflict { id: string; entity: SyncEntity; recordId: string; local: any; remote: any; localVersion: number; remoteVersion: number; createdAt: string; resolvedAt: string | null }
+export const SYNC_DELETED_HASH = 'deleted'
 
 export function canonicalHash(row: any): string {
   const canon = (x: any): string => {
@@ -45,7 +46,7 @@ export function diffRecords(entity: SyncEntity, local: SyncRow[], remote: SyncRo
     const lh = canonicalHash(l)
     if (!r) { if (!m || m.hash !== lh) toPush.push(l); continue }
     const rh = canonicalHash(r)
-    if (r.deletedAt) { if (!m || m.hash !== lh) tombstonesToPush.push(r); continue }
+    if (r.deletedAt) { if (m?.hash !== SYNC_DELETED_HASH) tombstonesToPush.push(r); continue }
     if (m) {
       const localChanged = lh !== m.hash; const remoteChanged = rh !== m.hash
       if (localChanged && remoteChanged && lh !== rh) {

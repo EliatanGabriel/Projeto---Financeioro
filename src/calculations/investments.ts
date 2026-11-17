@@ -147,30 +147,24 @@ export function summarizeInvestments(investments: Investment[], transactions: In
     .map(([name, value]) => ({ name, value: r2(value) })).sort((a, b) => b.value - a.value)
   const perInvestment = mine.map(i => ({ ...i, ...investmentGain(i) })).sort((a, b) => b.currentValue - a.currentValue)
   const months: { month: string; invested: number }[] = []
-  const sortedTx = [...transactions].sort((a, b) => a.date.localeCompare(b.date))
-  let running = 0
+  const events: { date: string; delta: number }[] = []
   for (const inv of mine) {
     const flows = txByInv.get(inv.id) || []
-    if (!flows.some(t => BUY_TYPES.includes(t.type) || SELL_TYPES.includes(t.type)) && inv.investedAmount > 0 && inv.startedAt) {
-      running += inv.investedAmount
-    }
+    const hasFlows = flows.some(t => BUY_TYPES.includes(t.type) || SELL_TYPES.includes(t.type))
+    if (!hasFlows && inv.investedAmount > 0 && validDate(inv.startedAt)) events.push({ date: inv.startedAt, delta: inv.investedAmount })
   }
+  for (const t of transactions) {
+    if (BUY_TYPES.includes(t.type)) events.push({ date: t.date, delta: t.amount })
+    else if (SELL_TYPES.includes(t.type)) events.push({ date: t.date, delta: -t.amount })
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date))
   const byMonth = new Map<string, number>()
-  for (const t of sortedTx) {
-    if (BUY_TYPES.includes(t.type)) running += t.amount
-    else if (SELL_TYPES.includes(t.type)) running -= t.amount
-    byMonth.set(t.date.slice(0, 7), running)
+  let running = 0
+  for (const e of events) {
+    running = r2(running + e.delta)
+    byMonth.set(e.date.slice(0, 7), running)
   }
-  // Incorpora o capital inicial de quem não tem histórico no mês de início (evita divergência dashboard↔evolução)
-  for (const inv of mine) {
-    const flows = txByInv.get(inv.id) || []
-    if (!flows.some(t => BUY_TYPES.includes(t.type) || SELL_TYPES.includes(t.type)) && inv.investedAmount > 0 && inv.startedAt) {
-      const k = inv.startedAt.slice(0, 7)
-      if (!byMonth.has(k)) byMonth.set(k, inv.investedAmount)
-    }
-  }
-  const monthsSorted = [...byMonth.entries()].sort()
-  for (const [month, invested] of monthsSorted.slice(-12)) months.push({ month, invested: r2(invested) })
+  for (const [month, invested] of [...byMonth.entries()].sort().slice(-12)) months.push({ month, invested })
   return {
     count: mine.length, totalCurrent, totalCostRemaining, totalInvested: totalCostRemaining,
     realized, unrealized, income, totalReturn,

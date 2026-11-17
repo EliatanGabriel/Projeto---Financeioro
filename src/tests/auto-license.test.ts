@@ -86,10 +86,19 @@ async function makePem() {
   const b64 = btoa(String.fromCharCode(...new Uint8Array(pkcs8)))
   return { pem: `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)!.join('\n')}\n-----END PRIVATE KEY-----`, kp }
 }
-// O Worker assina com a chave privada do dono; para o app validar, a chave pública precisa ser a do app.
-// Este teste usa a chave REAL do projeto (tools/private.key.pem) via leitura do arquivo no setup abaixo.
-import { readFileSync } from 'node:fs'
-const PRIVATE_PEM = readFileSync(new URL('../../tools/private.key.pem', import.meta.url), 'utf8')
+// Chave descartável gerada no teste: o Worker assina com ela e o verificador do app
+// recebe a pública correspondente, sem depender da chave privada real do projeto.
+const TEST_KEYS = await (async () => {
+  const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const pkcs8 = await crypto.subtle.exportKey('pkcs8', kp.privateKey)
+  const jwk: any = await crypto.subtle.exportKey('jwk', kp.publicKey)
+  return {
+    pem: `-----BEGIN PRIVATE KEY-----\n${Buffer.from(pkcs8).toString('base64').match(/.{1,64}/g)!.join('\n')}\n-----END PRIVATE KEY-----`,
+    jwk: JSON.stringify({ kty: jwk.kty, x: jwk.x, y: jwk.y, crv: jwk.crv }),
+  }
+})()
+const PRIVATE_PEM = TEST_KEYS.pem
+const verifyTestLicense = (key: string, deviceId: string) => verifyLicense(key, deviceId, TEST_KEYS.jwk)
 
 describe('liberação automática (webhook Cakto -> chave -> app)', () => {
   it('normaliza e-mail e valida assinatura HMAC da Cakto', async () => {
@@ -126,9 +135,9 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     expect(res.status).toBe(200)
     const data = await res.json()
     expect(data.ok).toBe(true)
-    const v = await verifyLicense(data.key, 'dev-123')
+    const v = await verifyTestLicense(data.key, 'dev-123')
     expect(v.ok).toBe(true); expect(isProActive(v.payload)).toBe(true); expect(v.payload!.holder).toBe('Pro User')
-    const wrong = await verifyLicense(data.key, 'outro-aparelho'); expect(wrong.ok).toBe(false)
+    const wrong = await verifyTestLicense(data.key, 'outro-aparelho'); expect(wrong.ok).toBe(false)
   })
   it('sem assinatura retorna 404 e app trata', async () => {
     const { env } = makeEnv()
@@ -338,7 +347,6 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     await processEvent({ event: 'purchase_approved', data: { id: 'cc2', customer: { email: 'race2@x.com', name: 'Race2' } } }, kv)
     const lic = (dev: string) => worker.fetch(new Request(`https://x/license?email=race2%40x.com&deviceId=${dev}`), env)
     const [a, b] = await Promise.all([lic('dev-A'), lic('dev-A')]); expect([a.status, b.status]).toEqual([200, 200])
-    const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('race2@x.com'))
     const payload = { event: 'subscription_renewed', data: { id: 'cc3', subscription: { id: 's', current_period: 2 }, customer: { email: 'race2@x.com', name: 'Race2' } } }
     const proc = () => doProc(env, 'race2@x.com', payload)
     const [r1, r2] = await Promise.all([proc(), proc()]); const j1 = await r1.json(); const j2 = await r2.json()
@@ -346,7 +354,6 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
   })
   it('H1 concorrência: renovações simultâneas de ciclos diferentes geram +2 meses (serializadas)', async () => {
     const kv = new FakeKV() as any; const { env } = makeEnv(kv)
-    const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('seq@x.com'))
     const proc = (payload: any) => doProc(env, 'seq@x.com', payload)
     const cust = { email: 'seq@x.com', name: 'Seq' }; const sub = (cp: number) => ({ id: 's', current_period: cp })
     await proc({ event: 'purchase_approved', data: { id: 'q1', subscription: sub(1), customer: cust } })
@@ -386,7 +393,6 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     await kv.put('sub:mig@x.com', JSON.stringify({ email: 'mig@x.com', name: 'Mig', status: 'active', revoked: false, deviceId: 'dev-old', plan: 'pro-monthly', expiresAt, lastCycles: { 'sub-1': 2 } }))
     expect((await lic('dev-old')).status).toBe(200)
     // Pedido legado no KV não reprocessa no DO (migração preguiçosa da chave order:<id>)
-    const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('mig@x.com'))
     const r = await doProc(env, 'mig@x.com', { event: 'purchase_approved', data: { id: 'mig-order', subscription: { id: 'sub-1', current_period: 3 }, customer: { email: 'mig@x.com', name: 'Mig' } } })
     expect((await r.json()).results[0].skipped).toBe('duplicate'); expect((await lic('dev-old')).status).toBe(200)
   })
@@ -394,7 +400,6 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     const kv = new FakeKV() as any; const { env } = makeEnv(kv)
     const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString()
     await kv.put('sub:leg@x.com', JSON.stringify({ email: 'leg@x.com', name: 'Leg', status: 'active', revoked: false, deviceId: 'dev-1', plan: 'pro-monthly', expiresAt, lastCycleSubId: 'sub-1', lastCycleNum: 2 }))
-    const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('leg@x.com'))
     const r = await doProc(env, 'leg@x.com', { event: 'subscription_renewed', data: { id: 'leg2', subscription: { id: 'sub-1', current_period: 2 }, customer: { email: 'leg@x.com', name: 'Leg' } } })
     expect((await r.json()).results[0].skipped).toBe('duplicate_cycle')
   })
@@ -761,8 +766,6 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     expect((await st.json()).state).toBe('freezing')
     await reg.fetch('https://license-store/internal/freeze-release-reserved', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ opId: op }) })
     expect((await worker.fetch(new Request('https://x/admin/freeze/confirm', { method: 'POST', headers: H, body: JSON.stringify({ token: 'admin-tok' }) }), env)).status).toBe(200)
-    // Desbloqueio recusado com operação ativa (forçado no storage): 409
-    const store = (env as any).__stores || (env as any).stores
   })
   it('H-R3: duas aquisições concorrentes + freeze concorrente sem corrida (serializadas)', async () => {
     const kv = new FakeKV() as any; const { env } = makeEnv(kv); const H = { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.62' }
@@ -904,9 +907,9 @@ describe('liberação automática (webhook Cakto -> chave -> app)', () => {
     await processEvent({ event: 'purchase_approved', data: { id: 'v1p', customer: { email: 'v@x.com', name: 'V' } } }, kv)
     const res = await worker.fetch(new Request('https://x/license?email=v%40x.com&deviceId=dev-9'), env)
     const { key } = await res.json()
-    expect((await verifyLicense('lixo', 'dev-9')).ok).toBe(false)
-    expect((await verifyLicense(key, '')).ok).toBe(false)
-    const v = await verifyLicense(key, 'dev-9'); expect(v.ok).toBe(true); expect(v.payload!.plan).toBe('pro-monthly')
+    expect((await verifyTestLicense('lixo', 'dev-9')).ok).toBe(false)
+    expect((await verifyTestLicense(key, '')).ok).toBe(false)
+    const v = await verifyTestLicense(key, 'dev-9'); expect(v.ok).toBe(true); expect(v.payload!.plan).toBe('pro-monthly')
   })
   it('R2: DO não-OK (400/409/500) vira HTTP 500 no webhook (retry da Cakto)', async () => {
     const secret = 'segredo-teste'

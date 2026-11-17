@@ -12,10 +12,14 @@ export function parseReminderSettings(raw?: string | null): ReminderSettings {
   if (!raw) return { ...REMINDER_DEFAULTS }
   try {
     const v = JSON.parse(raw)
+    const integer = (value: unknown, fallback: number, max: number) => {
+      const n = Number(value)
+      return Number.isFinite(n) ? Math.min(max, Math.max(0, Math.round(n))) : fallback
+    }
     return {
       enabled: v?.enabled === true,
-      daysBefore: Math.min(14, Math.max(0, Number(v?.daysBefore) || REMINDER_DEFAULTS.daysBefore)),
-      hour: Math.min(23, Math.max(0, Number(v?.hour) || REMINDER_DEFAULTS.hour)),
+      daysBefore: integer(v?.daysBefore, REMINDER_DEFAULTS.daysBefore, 14),
+      hour: integer(v?.hour, REMINDER_DEFAULTS.hour, 23),
     }
   } catch {
     return { ...REMINDER_DEFAULTS }

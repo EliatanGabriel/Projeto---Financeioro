@@ -107,4 +107,12 @@ describe('investimentos — dashboard separado e isolamento', () => {
     const rows = [inv({ userId: 'u1' }), inv({ id: 'x', userId: 'u2' }), inv({ id: 'y', userId: 'u2' })]
     expect(filterByUser(rows, 'u1')).toHaveLength(1); expect(filterByUser(rows, 'u2')).toHaveLength(2); expect(filterByUser(rows, 'ninguem')).toHaveLength(0)
   })
+  it('evolução soma capital inicial de todos os ativos sem histórico no mês de início', () => {
+    const a = inv({ id: 'a', investedAmount: 1000, startedAt: '2026-01-10' })
+    const b = inv({ id: 'b', investedAmount: 500, startedAt: '2026-01-20' })
+    const withFlow = inv({ id: 'c', investedAmount: 0, startedAt: '2026-01-01' })
+    const buy = tx({ id: 'buy', investmentId: 'c', type: 'compra', amount: 200, date: '2026-01-15' })
+    const s = summarizeInvestments([a, b, withFlow], [buy])
+    expect(s.evolution).toEqual([{ month: '2026-01', invested: 1700 }])
+  })
 })

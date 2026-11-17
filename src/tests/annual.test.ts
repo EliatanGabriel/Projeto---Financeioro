@@ -21,6 +21,11 @@ describe('resumo anual', () => {
     const a = annualSummary(tx, 2026)
     expect(a.avgIncome).toBe(3000); expect(a.biggestCategory?.name).toBe('Alimentação')
     expect(a.bestMonth?.month).toBe('2026-01'); expect(a.savingsRate).toBeGreaterThan(70)
+    expect(a.worstMonth?.month).toBe('2026-02')
+  })
+  it('pior mês nunca é um mês sem movimentação', () => {
+    const positive: Transaction[] = [{ id: 'p', description: 'Salário', amount: 100, type: 'in', category: 'Salário', date: '2026-05-01', createdAt: '' }]
+    expect(annualSummary(positive, 2026).worstMonth?.month).toBe('2026-05')
   })
   it('ano vazio não quebra', () => { const a = annualSummary([], 2026); expect(a.balance).toBe(0); expect(a.bestMonth).toBeUndefined() })
   it('comparativo com ano anterior', () => {

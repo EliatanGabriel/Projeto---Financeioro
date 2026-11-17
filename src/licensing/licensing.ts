@@ -5,14 +5,14 @@ export interface LicensePayload{holder:string;deviceId:string;issuedAt:string;ex
 export function getDeviceId(){
  let id=localStorage.getItem('precifica.deviceId'); if(!id){ const a=new Uint8Array(16); crypto.getRandomValues(a); id=Array.from(a).map(b=>b.toString(16).padStart(2,'0')).join(''); localStorage.setItem('precifica.deviceId',id) } return id
 }
-export async function verifyLicense(key:string, deviceId:string):Promise<{ok:boolean;reason:string;payload?:LicensePayload;license?:any}>{
+export async function verifyLicense(key:string, deviceId:string, publicJwkJson = PUBLIC_JWK_JSON):Promise<{ok:boolean;reason:string;payload?:LicensePayload;license?:any}>{
  try{
   const parts=key.trim().split('.'); if(parts.length!==3||parts[0]!=='PRP1') return {ok:false,reason:'Formato inválido. Esperado PRP1.payload.signature'}
   const data=b64uToBuf(parts[1]); const sig=b64uToBuf(parts[2])
   const payload: LicensePayload=JSON.parse(new TextDecoder().decode(data))
   if (!['pro-monthly','monthly','lifetime'].includes(payload.plan)) return {ok:false,reason:'Plano inválido.'}
   if (!payload.deviceId) return {ok:false,reason:'Licença sem vínculo de dispositivo.'}
-  const pub=await crypto.subtle.importKey('jwk',JSON.parse(PUBLIC_JWK_JSON),{name:'ECDSA',namedCurve:'P-256'},false,['verify'])
+  const pub=await crypto.subtle.importKey('jwk',JSON.parse(publicJwkJson),{name:'ECDSA',namedCurve:'P-256'},false,['verify'])
   const ok=await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},pub,sig,data)
   if(!ok) return {ok:false,reason:'Assinatura inválida.'}
   const now=new Date(); if(payload.expiresAt&&new Date(payload.expiresAt)<now) return {ok:false,reason:'Licença expirada.'}

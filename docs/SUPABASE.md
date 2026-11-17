@@ -5,7 +5,7 @@ Sem as variáveis abaixo, o app continua em **modo local/offline** como hoje.
 
 ## Configuração para o dono (uma vez)
 1. Crie um projeto em [supabase.com](https://supabase.com) (plano gratuito serve).
-2. Aplique as migrations: **SQL Editor** do projeto → cole `supabase/migrations/0001_schema.sql` e depois `0002_rls_policies.sql` (ou via CLI: `supabase link` + `supabase db push`).
+2. Aplique as migrations em ordem: **SQL Editor** do projeto → cole `0001_schema.sql`, `0002_rls_policies.sql`, `0003_credit_cards.sql` e `0004_rls_credit_cards.sql` (ou via CLI: `supabase link` + `supabase db push`). Sem as duas últimas, a sincronização de cartões falha.
 3. Em **Project Settings → API**, copie a **URL do projeto** e a chave **anon/publishable**.
 4. Copie `.env.example` para `.env.local` e preencha. Reinicie o `npm run dev`.
 5. Em **Auth → Providers → Email**, confirme que o provedor de e-mail está ativo; em **Auth → URL Configuration**, cadastre `http://localhost:5173` (confirmação e redefinição).
@@ -26,6 +26,9 @@ Sem as variáveis abaixo, o app continua em **modo local/offline** como hoje.
 | `goal_auto_launches` | `goal_auto_launches` | PK vira `(user_id, goal_id, month)`; FK p/ `goals` |
 | `investments` | `investments` | já tinha `user_id`; + `version`, `deleted_at`, `UNIQUE(id,user_id)` |
 | `investment_transactions` | `investment_transactions` | + `cost_removed/realized_gain`; FK composta `(investment_id,user_id)` → `investments` |
+| `credit_cards` | `credit_cards` | Cartões, limite, dias de fechamento/vencimento |
+| `credit_card_purchases` | `credit_card_purchases` | Compras parceladas (`total_amount`, `installments`, `first_date`) |
+| `credit_card_payments` | `credit_card_payments` | PK `(user_id, card_id, month)`; fatura paga |
 | `products`, `marketplaces`, `pricing_*` | — | Legado de precificação: **não sincroniza** |
 | `app_settings` | — | Local apenas (licença, tema, identidade do aparelho) |
 | `profiles` | `profiles` | Nova: `id = auth.users.id`, nome de exibição |
@@ -33,7 +36,7 @@ Sem as variáveis abaixo, o app continua em **modo local/offline** como hoje.
 Tipos: dinheiro `NUMERIC(14,2)`, quantidades/preços `NUMERIC(20,8)` (cripto), datas `DATE`, timestamps `TIMESTAMPTZ` com trigger de `updated_at`.
 
 ## Validação local das migrations
-As migrations foram validadas em PostgreSQL local temporário (stub de `auth.users`/`auth.uid()`): schema e políticas aplicam sem erro, 12 tabelas com RLS e 48 políticas presentes. Isolamento comprovado com papel comum (`nosuperuser nobypassrls`): insert próprio ok, insert alheio bloqueado pelo RLS, SELECT só enxerga os próprios registros. (Superusuário local pula RLS — o teste usou papel sem bypass.)
+As migrations foram validadas em PostgreSQL local temporário (stub de `auth.users`/`auth.uid()`): schema e políticas aplicam sem erro, 15 tabelas com RLS e 60 políticas presentes. Isolamento comprovado com papel comum (`nosuperuser nobypassrls`): insert próprio ok, insert alheio bloqueado pelo RLS, SELECT só enxerga os próprios registros. (Superusuário local pula RLS — o teste usou papel sem bypass.)
 
 ## Segurança (RLS)
 Todas as tabelas privadas com **Row Level Security** e 4 políticas cada (SELECT/INSERT/UPDATE/DELETE com `auth.uid() = user_id` nas duas cláusulas). `profiles` usa `id = auth.uid()`. O `user_id` do frontend nunca é confiável — a propriedade é validada no banco.

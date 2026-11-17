@@ -7,7 +7,7 @@ import type { SyncEntity, SyncRow } from './engine'
  */
 const REMOTE_OF: Record<string, string> = {
   userId: 'user_id', createdAt: 'created_at', updatedAt: 'updated_at', deletedAt: 'deleted_at',
-  dueDay: 'due_day', autoMonthly: 'auto_monthly', billId: 'bill_id', recurrenceId: 'recurrence_id', goalId: 'goal_id',
+  dueDay: 'due_day', autoMonthly: 'auto_monthly', billId: 'bill_id', recurrenceId: 'recurrence_id', goalId: 'goal_id', paidAt: 'paid_at',
   averagePrice: 'average_price', investedAmount: 'invested_amount', currentValue: 'current_value', startedAt: 'started_at',
   investmentId: 'investment_id', unitPrice: 'unit_price', costRemoved: 'cost_removed', realizedGain: 'realized_gain',
   cardId: 'card_id', limitAmount: 'limit_amount', closingDay: 'closing_day', totalAmount: 'total_amount', firstDate: 'first_date',

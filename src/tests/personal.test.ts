@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { summarize, validateTransaction, goalProgress, monthlyHistory, monthKey, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, dateForDay, isRecurrenceLaunched } from '../calculations/personal'
+import { summarize, validateTransaction, goalProgress, monthlyHistory, monthKey, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, dateForDay, isRecurrenceLaunched, refFromMonth } from '../calculations/personal'
+import { num, localDateISO } from '../utils/format'
 import type { Transaction, FixedBill } from '../types'
 
 const ref = new Date('2026-11-15T12:00:00')
@@ -64,5 +65,26 @@ describe('finanças pessoais (linguagem simples)', () => {
     const r: any = { id: 'r1', day: 5 }
     expect(isRecurrenceLaunched([{ recurrenceId: 'r1', month: '2026-11' }], r, '2026-11')).toBe(true)
     expect(isRecurrenceLaunched([], r, '2026-11')).toBe(false)
+  })
+  it('aceita apenas datas reais (2026-02-31 não vira março)', () => {
+    const t: any = { description: 'Teste', amount: 10, type: 'out', category: 'Outros', date: '2026-02-31' }
+    expect(validateTransaction(t)).toContain('Data inválida')
+    expect(monthlyHistory(tx, 1, refFromMonth('2026-11'))[0].month).toBe('2026-11')
+  })
+})
+
+describe('formatação de valores e datas', () => {
+  it('interpreta separadores brasileiros sem errar milhares por decimais', () => {
+    expect(num('1.500')).toBe(1500)
+    expect(num('1.234.567')).toBe(1234567)
+    expect(num('1.500,75')).toBe(1500.75)
+    expect(num('1,5')).toBe(1.5)
+    expect(num('R$ 1.234,56')).toBe(1234.56)
+    expect(num('-50,00')).toBe(-50)
+    expect(num('1.2.3')).toBe(0)
+  })
+  it('data padrão usa o fuso local, não UTC', () => {
+    const d = new Date(2026, 10, 17, 22, 30)
+    expect(localDateISO(d)).toBe('2026-11-17')
   })
 })

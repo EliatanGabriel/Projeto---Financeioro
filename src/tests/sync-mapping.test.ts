@@ -17,6 +17,11 @@ describe('sync — mapeamento local ↔ Supabase', () => {
     expect(toRemoteRow('investment_transactions', { id: 'x', userId: 'u1', investmentId: 'i1', type: 'compra', quantity: 1, unitPrice: 10, amount: 10, date: '2026-01-01', description: '', costRemoved: 0, realizedGain: 0, createdAt: '2026-01-01T00:00:00.000Z', version: 1 } as any)).toEqual({ id: 'x', user_id: 'u1', investment_id: 'i1', type: 'compra', quantity: 1, unit_price: 10, amount: 10, date: '2026-01-01', description: '', cost_removed: 0, realized_gain: 0, created_at: '2026-01-01T00:00:00.000Z', version: 1 })
   })
 
+  it('paidAt é mapeado para paid_at nas tabelas de pagamento', () => {
+    expect(toRemoteRow('bill_payments', { id: 'b1:2026-01', userId: 'u1', billId: 'b1', month: '2026-01', paidAt: '2026-01-03T00:00:00.000Z' } as any)).toEqual({ user_id: 'u1', bill_id: 'b1', month: '2026-01', paid_at: '2026-01-03T00:00:00.000Z' })
+    expect(toRemoteRow('credit_card_payments', { id: 'c1:2026-01', userId: 'u1', cardId: 'c1', month: '2026-01', paidAt: '2026-01-03T00:00:00.000Z' } as any)).toEqual({ user_id: 'u1', card_id: 'c1', month: '2026-01', paid_at: '2026-01-03T00:00:00.000Z' })
+  })
+
   it('fromRemoteRow devolve o formato local e faz round-trip de hash', () => {
     const local = { id: 'i1', userId: 'u1', name: 'CDB', category: 'Renda fixa', ticker: '', institution: 'Banco', quantity: 2, averagePrice: 50, investedAmount: 100, currentValue: 110, startedAt: '2026-01-01', notes: '', createdAt: '2026-01-01T00:00:00.000Z', version: 1 }
     const remote = { id: 'i1', user_id: 'u1', name: 'CDB', category: 'Renda fixa', ticker: '', institution: 'Banco', quantity: '2', average_price: '50.00', invested_amount: '100.00', current_value: '110.00', started_at: '2026-01-01', notes: '', created_at: '2026-01-01T00:00:00+00:00', updated_at: '2026-02-01T00:00:00+00:00', version: 3, deleted_at: null }

@@ -2,14 +2,14 @@
 
 Suas finanças no azul: organizador de finanças pessoais para pessoas comuns — sem jargão.
 Registre o que entra e sai, veja quanto sobra no mês, acompanhe contas fixas e metas.
-100% offline: seus dados ficam só neste aparelho.
+Funciona 100% offline: seus dados ficam só neste aparelho. Se quiser, configure Supabase e sincronize entre aparelhos.
 
 ## Como rodar
 
 ```bash
 npm install
 npm run dev         # http://localhost:5173
-npm test            # 140 testes
+npm test            # testes unitários
 npm run build       # gera dist/
 npm run preview
 npm run tauri:dev   # app de desktop (Tauri v2)
@@ -22,6 +22,7 @@ Pré-requisitos do desktop (Rust + dependências do sistema) em `docs/INSTALACAO
 
 - **Início:** quanto sobrou no mês, quanto pode gastar por dia, saldo total, dicas, alertas de limite/conta vencida, checklist de primeiros passos, gráficos
 - **Movimentos:** entrada/saída com categorias do dia a dia, **editar e apagar**, busca e filtro
+- **Cartões:** cadastro de cartões, faturas mensais, compras parceladas, limite usado e fatura paga
 - **Todo mês:** recorrências (salário, assinatura) que entram sozinhas todo mês, com botão "Lançar" por mês
 - **Contas fixas:** marcar como **paga/pendente** no mês, alertas de vencimento, editar
 - **Limites:** orçamento por categoria (ex.: Alimentação até R$ 800) com alertas quando chega perto ou passa
@@ -30,7 +31,7 @@ Pré-requisitos do desktop (Rust + dependências do sistema) em `docs/INSTALACAO
 - **Resumo:** previsão de fim de mês ("se continuar assim"), últimos 12 meses, onde mais gastou, **PDF do mês, CSV do mês e completo**
 - **Resumo anual:** opção "Ano todo" no Resumo — totais do ano, mês a mês, média, melhor/pior mês e onde mais gastou (grátis básico)
 - **NoAzul Pro (R$ 10/mês via Cakto):** análise anual avançada com nota 0–100, comparativo com o ano anterior, PDF/Excel anual, metas que guardam sozinhas todo mês, metas/recorrências ilimitadas e temas premium. Assinatura e ativação por chave na tela **Pro** — guia completo em `docs/CAKTO-PRO.md`
-- **Ajustes:** modo escuro, **categorias próprias**, importar planilha CSV, cópia/restauração completa, apagar tudo, link da Cakto
+- **Ajustes:** modo escuro, **categorias próprias**, importar planilha CSV/OFX e JSON, cópia/restauração completa validada, apagar tudo, link da Cakto
 - **Perfil:** avatar com iniciais, nome de exibição, e-mail, plano, status de sincronização, alterar senha, sair e excluir conta (ou modo local sem conta)
 
 Motor de cálculo em `src/calculations/personal.ts` e `src/calculations/annual.ts` (testados em `src/tests/`).

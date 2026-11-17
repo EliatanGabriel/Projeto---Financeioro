@@ -3,12 +3,12 @@ import { Wallet, Home, ArrowLeftRight, Receipt, PiggyBank, BarChart3, Settings a
 import { listTransactions, addTransaction, deleteTransaction, listFixedBills, upsertFixedBill, deleteFixedBill, listGoals, upsertGoal, deleteGoal, listBudgets, setBudget, listBillPayments, setBillPaid, listRecurrences, upsertRecurrence, deleteRecurrence, listRecurrenceLaunches, markRecurrenceLaunched, listCategories, addCategory, deleteCategory, clearAllData, listGoalAutoLaunches, markGoalAutoLaunched, listInvestments, upsertInvestment, deleteInvestment, listInvestmentTransactions, listAllInvestmentTransactions, addInvestmentTransaction, deleteInvestmentTransaction, replaceInvestmentTransaction, getSetting, setSetting, exportBackup, importBackup, resolveSyncConflict, listCreditCards, upsertCreditCard, deleteCreditCard, listCreditCardPurchases, upsertCreditCardPurchase, deleteCreditCardPurchase, listCreditCardPayments, setCreditCardPaid } from './database/db'
 import { INVESTMENT_CATEGORIES, INVESTMENT_TX_TYPES, TX_LABELS, validateInvestment, validateInvestmentTransaction, validateAgainstPosition, isDuplicateTransaction, applyTransactionDetailed, reverseTransaction, investmentGain, summarizeInvestments } from './calculations/investments'
 import { cardSummary, cardColor } from './calculations/creditCards'
-import { brl, newId, num, categoryColor } from './utils/format'
+import { brl, newId, num, categoryColor, localDateISO } from './utils/format'
 import { parseReminderSettings, dueBills, reminderMessage, reminderFingerprint, requestNotifications, showReminderNotification, notificationPermission } from './utils/reminders'
 import type { ReminderSettings } from './utils/reminders'
 import { parseOfx, looksLikeOfx } from './utils/ofx'
 import { exportCSV, exportPDFReport, exportXLSX } from './utils/reports'
-import { summarize, monthlyHistory, monthComparison, spendingSpikes, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
+import { summarize, monthlyHistory, monthComparison, spendingSpikes, goalProgress, validateTransaction, monthKey, monthLabel, shiftMonth, overallBalance, budgetStatus, billsSummary, forecast, onboardingSteps, isRecurrenceLaunched, recurrenceDate, refFromMonth, EXPENSE_CATEGORIES, INCOME_CATEGORIES, BILL_SUGGESTIONS, GOAL_SUGGESTIONS } from './calculations/personal'
 import { annualSummary, compareAnnual, financialScore, spendingTrend, proInsights } from './calculations/annual'
 import { PRO_PRICE_BRL, PRO_FEATURES, FREE_FEATURES, FREE_LIMITS, getCheckoutUrl, isCheckoutConfigured, getLicenseApiUrl, isLicenseApiConfigured } from './config/plans'
 import { verifyLicense, getDeviceId, isProActive, proDaysLeft, fetchAutoLicense } from './licensing/licensing'
@@ -26,7 +26,7 @@ const ACCENTS: Record<string, { label: string; brand: string; dark: string }> = 
   azul: { label: 'Azul (Pro)', brand: '#3B82F6', dark: '#2563EB' },
   ambar: { label: 'Âmbar (Pro)', brand: '#F59E0B', dark: '#D97706' },
 }
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => localDateISO()
 const GREEN = '#0E9F6E', ROSE = '#E11D63'
 
 async function currentPro(): Promise<boolean> {
@@ -54,16 +54,33 @@ async function ensureMonthlyRecurrences(uid: string) {
     }
   } catch {}
 }
-function parseCsvImport(text: string): Transaction[] {
+function parseCsvImport(text: string): { rows: Transaction[]; skipped: number } {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim())
-  const out: Transaction[] = []
+  const rows: Transaction[] = []
+  let skipped = 0
   for (const line of lines) {
     const parts = (line.includes(';') ? line.split(';') : line.split(',')).map(p => p.trim().replace(/^"|"$/g, ''))
-    if (parts.length < 5 || !/^\d{4}-\d{2}-\d{2}/.test(parts[0])) continue
-    const val = num(parts[4]); if (!val) continue
-    out.push({ id: newId(), description: parts[1] || 'Importado', amount: val, type: /entr|in/i.test(parts[2]) ? 'in' : 'out', category: parts[3] || 'Outros', date: parts[0].slice(0, 10), createdAt: new Date().toISOString() })
+    if (parts.length < 5 || !/^\d{4}-\d{2}-\d{2}/.test(parts[0])) { skipped++; continue }
+    const t: Transaction = { id: newId(), description: parts[1] || 'Importado', amount: Math.abs(num(parts[4])), type: /entr|in/i.test(parts[2]) ? 'in' : 'out', category: parts[3] || 'Outros', date: parts[0].slice(0, 10), createdAt: new Date().toISOString() }
+    if (validateTransaction(t).length) { skipped++; continue }
+    rows.push(t)
   }
-  return out
+  return { rows, skipped }
+}
+
+async function importJsonData(text: string, userId: string) {
+  const data = JSON.parse(text)
+  if (!data || typeof data !== 'object' || !Array.isArray(data.transactions)) throw new Error('Arquivo JSON inválido.')
+  for (const t of data.transactions as Transaction[]) await addTransaction({ ...t, userId })
+  for (const b of (data.fixedBills || []) as FixedBill[]) await upsertFixedBill({ ...b, userId })
+  for (const g of (data.goals || []) as Goal[]) await upsertGoal({ ...g, userId })
+  for (const b of (data.budgets || []) as Budget[]) await setBudget(b.category, b.limit, userId)
+  for (const p of (data.billPayments || []) as BillPayment[]) await setBillPaid(p.billId, p.month, true, userId)
+  for (const r of (data.recurrences || []) as Recurrence[]) await upsertRecurrence({ ...r, userId })
+  for (const l of (data.recurrenceLaunches || []) as any[]) await markRecurrenceLaunched(l.recurrenceId, l.month, userId)
+  for (const c of (data.categories || []) as Category[]) await addCategory(c.name, c.type, userId)
+  for (const l of (data.goalAutoLaunches || []) as any[]) await markGoalAutoLaunched(l.goalId, l.month, userId)
+  for (const i of (data.investments || []) as Investment[]) await upsertInvestment({ ...i, userId })
 }
 
 export default function App() {
@@ -114,7 +131,7 @@ export default function App() {
     if (key) {
       const r = await verifyLicense(key, getDeviceId())
       if (r.ok && isProActive(r.payload)) setPro({ activated: true, holder: r.payload!.holder, expiresAt: r.payload!.expiresAt, plan: r.payload!.plan, key })
-      else setPro({ activated: false, holder: r.payload?.holder || (await getSetting('licenseHolder') || ''), expiresAt: r.payload?.expiresAt || (await getSetting('licenseExpires') || null), plan: r.payload?.plan || '', key, expired: r.ok, reason: r.reason })
+      else setPro({ activated: false, holder: r.payload?.holder || (await getSetting('licenseHolder') || ''), expiresAt: r.payload?.expiresAt || (await getSetting('licenseExpires') || null), plan: r.payload?.plan || '', key, expired: r.reason === 'Licença expirada.', reason: r.reason })
     } else setPro({ activated: false, holder: '', expiresAt: null, plan: '', key: '' })
   }
   const uid = auth?.user?.id || userId
@@ -145,24 +162,24 @@ export default function App() {
     })()
   }, [authUser?.id])
   useEffect(() => {
-    if (authUser?.id) {
-      ;(async () => {
-        const uidNow = auth?.user?.id || (await getSetting('userId')) || getDeviceId()
-        try { await ensureMonthlyRecurrences(uidNow) } catch {}
-        await reload()
-        try {
-          const savedKey = await getSetting('licenseKey'); if (!savedKey) return
-          const v = await verifyLicense(savedKey, getDeviceId())
-          const days = v.payload ? proDaysLeft(v.payload) : 0
-          if (v.ok && isProActive(v.payload) && days > 7) return
-          const savedEmail = await getSetting('caktoEmail'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
-          if (!savedEmail || !isLicenseApiConfigured(api)) return
-          const r = await fetchAutoLicense(api, savedEmail, getDeviceId())
-          if (r.ok && r.key) { const nv = await verifyLicense(r.key, getDeviceId()); if (nv.ok && isProActive(nv.payload)) { await setSetting('licenseKey', r.key); await setSetting('licenseHolder', nv.payload!.holder); await setSetting('licenseExpires', nv.payload!.expiresAt || ''); await setSetting('plan', nv.payload!.plan) } }
-        } catch {}
-      })()
-    }
-  }, [authUser?.id])
+    if (authConfigured && auth.loading) return
+    ;(async () => {
+      const uidNow = authUser?.id || (await getSetting('userId')) || getDeviceId()
+      if (!authUser) await setSetting('userId', uidNow)
+      try { await ensureMonthlyRecurrences(uidNow) } catch {}
+      await reload()
+      try {
+        const savedKey = await getSetting('licenseKey'); if (!savedKey) return
+        const v = await verifyLicense(savedKey, getDeviceId())
+        const days = v.payload ? proDaysLeft(v.payload) : 0
+        if (v.ok && isProActive(v.payload) && days > 7) return
+        const savedEmail = await getSetting('caktoEmail'); const api = getLicenseApiUrl(await getSetting('licenseApiUrl'))
+        if (!savedEmail || !isLicenseApiConfigured(api)) return
+        const r = await fetchAutoLicense(api, savedEmail, getDeviceId())
+        if (r.ok && r.key) { const nv = await verifyLicense(r.key, getDeviceId()); if (nv.ok && isProActive(nv.payload)) { await setSetting('licenseKey', r.key); await setSetting('licenseHolder', nv.payload!.holder); await setSetting('licenseExpires', nv.payload!.expiresAt || ''); await setSetting('plan', nv.payload!.plan); await reload() } }
+      } catch {}
+    })()
+  }, [authUser?.id, authConfigured, auth.loading])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark) }, [dark])
   useEffect(() => {
     let cancelled = false
@@ -213,8 +230,8 @@ export default function App() {
   }
 
   const s = useMemo(() => summarize(tx, bills, month), [tx, bills, month])
-  const history = useMemo(() => monthlyHistory(tx, 6), [tx])
-  const history12 = useMemo(() => monthlyHistory(tx, 12), [tx])
+  const history = useMemo(() => monthlyHistory(tx, 6, refFromMonth(month)), [tx, month])
+  const history12 = useMemo(() => monthlyHistory(tx, 12, refFromMonth(month)), [tx, month])
   const overall = useMemo(() => overallBalance(tx), [tx])
   const bstatus = useMemo(() => budgetStatus(tx, budgets, month), [tx, budgets, month])
   const bsum = useMemo(() => billsSummary(bills, payments, month), [bills, payments, month])
@@ -238,7 +255,7 @@ export default function App() {
   const loadSamples = async () => {
     if (!uid) return
     try {
-      const monthsAgo = (n: number) => { const d = new Date(); d.setMonth(d.getMonth() - n); return d.toISOString().slice(0, 10) }
+      const monthsAgo = (n: number) => { const d = new Date(); return localDateISO(new Date(d.getFullYear(), d.getMonth() - n, 1)) }
       const now = new Date().toISOString()
       const samples: Array<[string, number, 'in' | 'out', string, number]> = [
         ['Salário (exemplo)', 3500, 'in', 'Salário', 0], ['Salário (exemplo)', 3500, 'in', 'Salário', 1], ['Freelance (exemplo)', 500, 'in', 'Trabalho extra', 1],
@@ -528,6 +545,7 @@ function Movimentos({ userId, tx, month, reload, show, expenseCats, incomeCats, 
   const periodLabel = period === 'mes' ? `em ${monthLabel(month)}` : period === '3m' ? 'nos últimos 3 meses' : period === 'ano' ? `em ${month.slice(0, 4)}` : 'no período'
   useEffect(() => { if (!cats.includes(form.category)) setForm((f: any) => ({ ...f, category: cats[0] })) }, [form.type])
   const save = async () => {
+    if (!userId) return show('Aguarde carregar seus dados e tente de novo.')
     const t: Transaction = { id: editingId || newId(), description: form.description.trim(), amount: num(form.amount), type: form.type, category: form.category, date: form.date, createdAt: new Date().toISOString() }
     const errs = validateTransaction(t); if (errs.length) return show(errs[0])
     try { await addTransaction({ ...t, userId }); await reload(); setEditingId(null); setForm({ description: '', amount: '', type: 'out', category: expenseCats[1] || 'Alimentação', date: today() }); show(editingId ? 'Alteração salva' : (t.type === 'in' ? 'Entrada adicionada' : 'Saída adicionada')) } catch (e: any) { show(e?.message || 'Não foi possível salvar. Tente de novo.') }
@@ -643,7 +661,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
   const [selectedId, setSelectedId] = useState('')
   const [cardForm, setCardForm] = useState<any>({ name: '', brand: '', limit: '', closingDay: '5', dueDay: '12', color: '#0E9F6E' })
   const [editingCard, setEditingCard] = useState<string | null>(null)
-  const [purchaseForm, setPurchaseForm] = useState<any>({ description: '', category: 'Outros', total: '', installments: '1', firstDate: new Date().toISOString().slice(0, 10), notes: '' })
+  const [purchaseForm, setPurchaseForm] = useState<any>({ description: '', category: 'Outros', total: '', installments: '1', firstDate: today(), notes: '' })
   const selected = cards.find((c: any) => c.id === selectedId) || cards[0]
   const sum = selected ? cardSummary(selected, purchases, payments, month) : null
   const resetCard = () => { setEditingCard(null); setCardForm({ name: '', brand: '', limit: '', closingDay: '5', dueDay: '12', color: '#0E9F6E' }) }
@@ -669,7 +687,7 @@ function Cartoes({ userId, cards, purchases, payments, month, expenseCats, reloa
     if (!purchaseForm.description.trim() || !num(purchaseForm.total)) return show('Informe a descrição e o valor da compra')
     try {
       await upsertCreditCardPurchase({ id: newId(), userId, cardId: selected.id, description: purchaseForm.description.trim(), category: purchaseForm.category || 'Outros', totalAmount: num(purchaseForm.total), installments: Math.max(1, Number(purchaseForm.installments) || 1), firstDate: purchaseForm.firstDate, notes: purchaseForm.notes || '', createdAt: new Date().toISOString() })
-      await reload(); setPurchaseForm({ description: '', category: 'Outros', total: '', installments: '1', firstDate: new Date().toISOString().slice(0, 10), notes: '' }); show('Compra adicionada')
+      await reload(); setPurchaseForm({ description: '', category: 'Outros', total: '', installments: '1', firstDate: today(), notes: '' }); show('Compra adicionada')
     } catch (e: any) { show(e?.message || 'Não foi possível salvar a compra.') }
   }
   return <div className="space-y-5">
@@ -854,8 +872,9 @@ function AnnualView({ tx, isPro, requirePro, show }: any) {
   const a = useMemo(() => annualSummary(tx, year), [tx, year])
   const cmp = useMemo(() => compareAnnual(tx, year), [tx, year])
   const score = useMemo(() => financialScore(tx, year), [tx, year])
-  const trend = useMemo(() => spendingTrend(tx), [tx])
-  const insights = useMemo(() => proInsights(tx, year), [tx, year])
+  const trendRef = year === new Date().getFullYear() ? new Date() : new Date(year, 11, 31)
+  const trend = useMemo(() => spendingTrend(tx, trendRef), [tx, year])
+  const insights = useMemo(() => proInsights(tx, year, trendRef), [tx, year])
   const fmt = (v: number) => (v > 0 ? '+' : '') + brl(v)
   const pdfAnnual = async () => { if (!requirePro()) return; await exportPDFReport(`NoAzul — Resumo anual ${year}`, [`Entrou: ${brl(a.income)}`, `Saiu: ${brl(a.expense)}`, `Sobrou: ${brl(a.balance)}`, `Média mensal de gastos: ${brl(a.avgExpense)}`, `Nota: ${score.score}/100 — ${score.label}`, '', ...a.months.map((m: any) => `${m.label}: entrou ${brl(m.income)} • saiu ${brl(m.expense)} • sobrou ${brl(m.balance)}`), '', ...a.byCategory.map((c: any) => `${c.name}: ${brl(c.value)}`), '', ...insights], `noazul-anual-${year}.pdf`); show('PDF anual baixado') }
   const xlsxAnnual = async () => { if (!requirePro()) return; await exportXLSX(tx.filter((t: any) => Number(t.date.slice(0, 4)) === year).map((t: any) => ({ Data: t.date, Descrição: t.description, Tipo: t.type === 'in' ? 'Entrou' : 'Saiu', Categoria: t.category, Valor: t.amount })), `noazul-anual-${year}.xlsx`); show('Excel anual baixado') }
@@ -1343,10 +1362,11 @@ function Config({ userId, dark, setDark, categories, bills, payments, tx, reload
       <div className="flex gap-2 flex-wrap">
         <button className="btn-ghost" onClick={async () => { try { const b = await exportBackup(); const u = URL.createObjectURL(new Blob([b as any], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-backup.db'; a.click(); show('Cópia baixada') } catch (e:any) { show(e?.message || 'Não foi possível baixar a cópia.') } }}><Download size={15} /> Baixar cópia</button>
         <button className="btn-ghost" onClick={async () => { try { const [transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions] = await Promise.all([listTransactions(userId), listFixedBills(userId), listGoals(userId), listBudgets(userId), listBillPayments(userId), listRecurrences(userId), listRecurrenceLaunches(userId), listCategories(userId), listGoalAutoLaunches(userId), listInvestments(userId), listAllInvestmentTransactions(userId)]); const payload = { exportedAt: new Date().toISOString(), transactions, fixedBills, goals, budgets, billPayments, recurrences, recurrenceLaunches, categories, goalAutoLaunches, investments, investmentTransactions }; const u = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = u; a.download = 'noazul-dados.json'; a.click(); URL.revokeObjectURL(u); show('JSON exportado') } catch (e:any) { show(e?.message || 'Não foi possível exportar o JSON.') } }}><Download size={15} /> Exportar JSON</button>
+        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar JSON<input type="file" accept=".json,application/json" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { if (!userId) return show('Aguarde carregar seus dados.'); await importJsonData(await f.text(), userId); await reload(); show('JSON importado — as posições de investimentos permanecem as atuais.') } catch (err:any) { show(err?.message || 'Não foi possível importar o JSON.') } }} /></label>
         <label className="btn-ghost cursor-pointer"><Upload size={15} /> Restaurar cópia<input type="file" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importBackup(new Uint8Array(await f.arrayBuffer())); await reload(); show('Dados restaurados') } catch (err:any) { show(err?.message || 'Não foi possível restaurar.') } }} /></label>
-        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar OFX/CSV<input type="file" accept=".csv,.ofx,.qfx,text/csv,application/x-ofx" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const text = await f.text(); const rows = /\.(ofx|qfx)$/i.test(f.name) || looksLikeOfx(text) ? parseOfx(text) : parseCsvImport(text); if (!rows.length) return show('Nenhum lançamento válido encontrado no arquivo'); const known = tx.slice(); let imported = 0; let skipped = 0; for (const r of rows) { const t = { ...r, userId }; if (known.some((k: any) => k.date === t.date && k.type === t.type && k.amount === t.amount && (k.description || '').trim().toLowerCase() === (t.description || '').trim().toLowerCase())) { skipped++; continue } await addTransaction(t); known.push(t); imported++ } await reload(); show(`${imported} lançamento(s) importado(s)${skipped ? ` • ${skipped} duplicado(s) ignorado(s)` : ''}`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
+        <label className="btn-ghost cursor-pointer"><Upload size={15} /> Importar OFX/CSV<input type="file" accept=".csv,.ofx,.qfx,text/csv,application/x-ofx" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { const text = await f.text(); const parsed = /\.(ofx|qfx)$/i.test(f.name) || looksLikeOfx(text) ? { rows: parseOfx(text), skipped: 0 } : parseCsvImport(text); const rows = parsed.rows; if (!rows.length) return show('Nenhum lançamento válido encontrado no arquivo'); const known = tx.slice(); let imported = 0; let skipped = 0; for (const r of rows) { const t = { ...r, userId }; if (known.some((k: any) => k.date === t.date && k.type === t.type && k.amount === t.amount && (k.description || '').trim().toLowerCase() === (t.description || '').trim().toLowerCase())) { skipped++; continue } await addTransaction(t); known.push(t); imported++ } await reload(); show(`${imported} lançamento(s) importado(s)${skipped ? ` • ${skipped} duplicado(s) ignorado(s)` : ''}${parsed.skipped ? ` • ${parsed.skipped} linha(s) inválida(s)` : ''}`) } catch (err:any) { show(err?.message || 'Não foi possível importar.') } }} /></label>
       </div>
-      <p className="muted text-xs">CSV no formato Data;Descrição;Tipo;Categoria;Valor (o mesmo que o app exporta) ou extrato OFX/QFX do banco. Lançamentos idênticos são ignorados. A cópia completa guarda tudo em um arquivo só — ela também contém sua licença e dados financeiros, então guarde em local seguro.</p>
+      <p className="muted text-xs">CSV no formato Data;Descrição;Tipo;Categoria;Valor (o mesmo que o app exporta) ou extrato OFX/QFX do banco. Lançamentos idênticos são ignorados. O JSON exportado pode ser importado de volta; as movimentações de investimentos não são reimportadas para não alterar o custo médio. A cópia completa guarda tudo em um arquivo só — ela também contém sua licença e dados financeiros, então guarde em local seguro.</p>
     </section>
     <section className="card p-6 space-y-3" style={{ borderColor: '#FECDD3' }}>
       <h2 className="font-bold text-rose-600">Zona de perigo</h2>

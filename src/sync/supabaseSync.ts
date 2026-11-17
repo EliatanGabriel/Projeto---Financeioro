@@ -43,7 +43,7 @@ export function supabaseSyncClient(userId: string) {
       const monthPart = parts[1] || ''
       query = query.eq('user_id', userId).eq('card_id', cid).eq('month', monthPart)
     }
-    const { error } = await query.select().single()
+    const { error } = await query
     if (error) throw error
   }
 

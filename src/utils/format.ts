@@ -1,8 +1,32 @@
 export const brl=(v:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0)
 export const pct=(v:number)=>new Intl.NumberFormat('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v)||0)+'%'
-export const num=(s:string)=>{let t=String(s??'').trim().replace(/[^\d.,-]/g,'');if(!t||t==='-'||t==='.'||t===',')return 0;if(t.includes('.')&&t.includes(','))t=t.replace(/\./g,'').replace(',','.');else t=t.replace(',','.');const n=parseFloat(t);return isNaN(n)?0:n}
+export function num(s: string): number {
+  let t = String(s ?? '').trim().replace(/[^\d.,-]/g, '')
+  if (!t || t === '-' || t === '.' || t === ',') return 0
+  const negative = t.startsWith('-')
+  t = t.replace(/-/g, '')
+  const dots = (t.match(/\./g) || []).length
+  const commas = (t.match(/,/g) || []).length
+  if (dots > 1 && commas > 0) return 0
+  if (commas > 1 && dots > 0) return 0
+  if (dots > 0 && commas > 0) {
+    const decimal = t.lastIndexOf('.') > t.lastIndexOf(',') ? '.' : ','
+    const thousands = decimal === '.' ? ',' : '.'
+    t = t.split(thousands).join('').replace(decimal, '.')
+  } else if (dots > 0) {
+    if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '')
+    else if (dots !== 1) return 0
+  } else if (commas > 0) {
+    if (/^\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, '')
+    else if (commas !== 1) return 0
+    else t = t.replace(',', '.')
+  }
+  const n = Number(t)
+  return Number.isFinite(n) ? (negative ? -n : n) : 0
+}
 export const newId=()=> (crypto as any)?.randomUUID?.() ?? Date.now().toString(36)+Math.random().toString(36).slice(2,9)
 export const todayISO=()=>new Date().toISOString()
+export const localDateISO=(d = new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 export const showConfirm=(msg:string)=>confirm(msg)
 export const confirm=(msg:string)=>new Promise<boolean>(res => res(showConfirm(msg)))
 

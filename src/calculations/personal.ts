@@ -1,4 +1,5 @@
 import type {Transaction, FixedBill, Goal, Budget, BillPayment, Recurrence} from '../types'
+import { validDate } from './investments'
 
 export const EXPENSE_CATEGORIES = ['Moradia','Alimentação','Transporte','Contas da casa','Lazer','Saúde','Educação','Compras','Assinaturas','Outros'] as const
 export const INCOME_CATEGORIES = ['Salário','Trabalho extra','Venda','Presente','Reembolso','Outros'] as const
@@ -30,7 +31,7 @@ export function validateTransaction(t: Partial<Transaction>): string[] {
   if (!t.description?.trim()) errs.push('Dê um nome, por exemplo: Supermercado')
   if (!t.amount || t.amount <= 0) errs.push('Informe um valor maior que zero')
   if (!t.date) errs.push('Escolha a data')
-  else if (isNaN(new Date(t.date + 'T12:00:00').getTime())) errs.push('Data inválida')
+  else if (!validDate(t.date)) errs.push('Data inválida')
   if (t.type !== 'in' && t.type !== 'out') errs.push('Escolha se entrou ou saiu dinheiro')
   if (!t.category?.trim()) errs.push('Escolha uma categoria')
   return errs
@@ -142,6 +143,10 @@ export function onboardingSteps(tx: Transaction[], bills: FixedBill[], goals: Go
     { label: 'Definir um limite para uma categoria', done: budgets.some(b => b.limit > 0), tab: 'resumo' },
     { label: 'Criar uma meta (viagem, reserva...)', done: goals.length > 0, tab: 'metas' },
   ]
+}
+export const refFromMonth = (month: string) => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, 1)
 }
 export function monthlyHistory(transactions: Transaction[], months = 6, ref = new Date()) {
   const out: { month: string; label: string; income: number; expense: number; balance: number }[] = []

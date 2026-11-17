@@ -6,7 +6,7 @@ const r2 = (v: number) => Math.round((Number(v) || 0) * 100) / 100
 export function invoiceMonthFor(date: string, closingDay: number): string {
   const d = new Date((date || '').slice(0, 10) + 'T12:00:00')
   if (isNaN(d.getTime())) return monthKey(new Date())
-  const closing = Math.max(1, Math.min(28, Math.round(closingDay || 1)))
+  const closing = Math.max(1, Math.min(31, Math.round(closingDay || 1)))
   const base = monthKey(d)
   return d.getDate() > closing ? shiftMonth(base, 1) : base
 }

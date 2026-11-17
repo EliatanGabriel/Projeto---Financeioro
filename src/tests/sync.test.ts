@@ -51,6 +51,21 @@ describe('sync — diff, hash e fila', () => {
     expect(local.find((r: any) => r.id === '2')).toBeTruthy()
     expect(meta.get('1')?.hash).toBe(canonicalHash(row('1', { description: 'local' })))
   })
+  it('tombstone remoto remove a cópia local e não reaplica na próxima sincronização', async () => {
+    const local = [row('1')]
+    const remote = [row('1', { deletedAt: '2026-02-01T00:00:00Z' })]
+    const meta = new Map([['1', { hash: canonicalHash(row('1')), version: 1 }]])
+    const deleted: string[] = []
+    const store: any = {
+      listLocal: async () => local, replaceLocal: async () => {}, getMeta: async () => meta, setMeta: async (_e: any, m: any) => { meta.clear(); m.forEach((v: any, k: string) => meta.set(k, v)) },
+      getLastPulledAt: async () => null, setLastPulledAt: async () => {}, getQueue: async () => [], saveQueue: async () => {},
+      addConflicts: async () => {}, getConflicts: async () => [], resolveConflictLocal: async () => {}, deleteLocal: async (_e: any, id: string) => { deleted.push(id); local.splice(0, local.length) },
+    }
+    const client: any = { fetchAll: async () => remote, upsert: async (_e: any, r: any) => r, softDelete: async () => {} }
+    await syncAll(store, client, ['transactions'], () => {})
+    await syncAll(store, client, ['transactions'], () => {})
+    expect(deleted).toEqual(['1'])
+  })
   it('syncAll offline: estado offline e fila preservada', async () => {
     const store: any = { listLocal: async () => [], replaceLocal: async () => {}, getMeta: async () => new Map(), setMeta: async () => {}, getLastPulledAt: async () => null, setLastPulledAt: async () => {}, getQueue: async () => [{ opId: 'x', entity: 'transactions', recordId: '1', op: 'delete', payload: {}, baseVersion: 0, attempts: 0, nextRetryAt: null, createdAt: '' }], saveQueue: async () => {}, addConflicts: async () => {}, getConflicts: async () => [], resolveConflictLocal: async () => {} }
     const client: any = { fetchAll: async () => { throw new Error('network down') }, upsert: async () => ({}), softDelete: async () => { throw new Error('offline') } }

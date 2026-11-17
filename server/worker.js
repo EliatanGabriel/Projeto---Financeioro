@@ -558,7 +558,7 @@ export async function processEvent(payload, kv) {
     const now = new Date()
     const isResume = event === 'subscription_resumed'
     // Watermark por assinatura: mapa subscription.id -> maior ciclo já estendido (migra lastCycle legado).
-    const lastCycles = { ...(existing?.lastCycles || {}) }
+    const lastCycles = { ...existing?.lastCycles }
     if (existing?.lastCycleSubId && existing?.lastCycleNum != null && lastCycles[existing.lastCycleSubId] == null) lastCycles[existing.lastCycleSubId] = existing.lastCycleNum
     const subId = subscriptionId(data)
     const cycleNum = cycleNumber(data)
@@ -629,7 +629,7 @@ async function freezeRelease(env, opId) {
   try {
     const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('__registry__'))
     await stub.fetch('https://license-store/internal/freeze-release-reserved', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ opId }) })
-  } catch (e) { console.error('[freeze] release failed') }
+  } catch { console.error('[freeze] release failed') }
 }
 async function freezeState(env) {
   const stub = env.LICENSE_DO.get(env.LICENSE_DO.idFromName('__registry__'))

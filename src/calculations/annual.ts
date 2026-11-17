@@ -17,9 +17,9 @@ export function annualSummary(transactions: Transaction[], year: number) {
   const activeMonths = months.filter(m => m.income + m.expense > 0)
   const byCategory = Object.entries(tx.filter(t => t.type === 'out').reduce<Record<string, number>>((acc, t) => { acc[t.category] = (acc[t.category] || 0) + t.amount; return acc }, {}))
     .map(([name, value]) => ({ name, value: r2(value) })).sort((a, b) => b.value - a.value)
-  const sorted = [...months].sort((a, b) => b.balance - a.balance)
-  const bestMonth = activeMonths.length ? sorted.find(m => m.income + m.expense > 0) : undefined
-  const worstMonth = activeMonths.length ? sorted[sorted.length - 1] : undefined
+  const sorted = [...activeMonths].sort((a, b) => b.balance - a.balance)
+  const bestMonth = sorted[0]
+  const worstMonth = sorted[sorted.length - 1]
   const divisor = activeMonths.length || 1
   return {
     year, income, expense, balance: r2(income - expense), months, byCategory,
